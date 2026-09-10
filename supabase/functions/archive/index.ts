@@ -1,0 +1,282 @@
+import { createClient } from "npm:@supabase/supabase-js@2.57.4";
+import { types, matchesMagic } from "./media.ts";
+const url = Deno.env.get("SUPABASE_URL")!,
+  key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  anon = Deno.env.get("SUPABASE_ANON_KEY")!;
+const service = createClient(url, key, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
+const bucket = service.storage.from("community-media");
+const origins = (Deno.env.get("ALLOWED_ORIGINS") || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+const check = (value: unknown, max: number, label: string) => {
+  if (typeof value !== "string" || !value.trim() || value.trim().length > max)
+    throw new Error(`Invalid ${label}.`);
+  return value.trim();
+};
+const hash = async (value: string) =>
+  Array.from(
+    new Uint8Array(
+      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)),
+    ),
+  )
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+async function result<T>(
+  promise: PromiseLike<{ data: T; error: unknown }>,
+): Promise<NonNullable<T>> {
+  const { data, error } = await promise;
+  if (error)
+    throw new Error(
+      "The archive could not complete this request. Please try again.",
+    );
+  return data!;
+}
+async function authorize(req: Request) {
+  const auth = req.headers.get("Authorization");
+  if (!auth) throw new Error("Administrator sign-in required.");
+  const client = createClient(url, anon, {
+    global: { headers: { Authorization: auth } },
+    auth: { persistSession: false },
+  });
+  const {
+    data: { user },
+    error,
+  } = await client.auth.getUser();
+  if (error || !user || !(await result(client.rpc("is_admin"))))
+    throw new Error("Administrator access expired or denied.");
+}
+async function readBody(req: Request) {
+  const reader = req.body?.getReader();
+  if (!reader) throw new Error("Request body required.");
+  const bytes: number[] = [];
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (bytes.length + value.length > 8192)
+        throw new Error("Request too large.");
+      bytes.push(...value);
+    }
+  } finally {
+    await reader.cancel();
+  }
+  return JSON.parse(new TextDecoder().decode(new Uint8Array(bytes)));
+}
+Deno.serve(async (req) => {
+  const origin = req.headers.get("Origin") || "";
+  const headers = {
+    "Access-Control-Allow-Origin": origins.includes(origin) ? origin : "null",
+    "Access-Control-Allow-Headers":
+      "authorization, apikey, content-type, x-client-info",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    Vary: "Origin",
+    "Content-Type": "application/json",
+  };
+  if (req.method === "OPTIONS")
+    return new Response(null, { status: 204, headers });
+  if (req.method !== "POST")
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers,
+    });
+  try {
+    if (!origins.includes(origin))
+      throw new Error("This site is not allowed to connect.");
+    if (Number(req.headers.get("content-length") || 0) > 8192)
+      throw new Error("Request too large.");
+    const body = await readBody(req);
+    let output: unknown;
+    if (body.action === "reserve") {
+      // Rate limits are defense in depth. CORS is not authentication.
+      const ip =
+        req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+      if (
+        !(await result(
+          service.rpc("consume_upload_limit", { rate_key: await hash(ip) }),
+        ))
+      )
+        throw new Error("Too many uploads. Please try again in an hour.");
+      const username = check(body.username, 60, "username"),
+        caption = check(body.caption, 1000, "caption");
+      if (!Object.hasOwn(types, body.ext) || types[body.ext] !== body.mime)
+        throw new Error("Unsupported media type.");
+      const max = body.mime.startsWith("video/")
+        ? Number(Deno.env.get("MAX_VIDEO_SIZE") || 52428800)
+        : Number(Deno.env.get("MAX_IMAGE_SIZE") || 20971520);
+      if (!Number.isSafeInteger(body.size) || body.size <= 0 || body.size > max)
+        throw new Error("This file is too large or empty.");
+      const id = crypto.randomUUID(),
+        token = crypto.randomUUID() + crypto.randomUUID(),
+        path = `${id}_${Date.now()}.${body.ext}`;
+      await result(
+        service
+          .from("posts")
+          .insert({
+            id,
+            username,
+            caption,
+            storage_path: path,
+            mime: body.mime,
+            expected_size: body.size,
+            upload_token_hash: await hash(token),
+            media_type: body.mime.startsWith("video/")
+              ? "video"
+              : body.mime === "image/gif"
+                ? "gif"
+                : "image",
+          }),
+      );
+      try {
+        const signed = await result(
+          bucket.createSignedUploadUrl(path, { upsert: false }),
+        );
+        output = { id, token, url: signed.signedUrl };
+      } catch (e) {
+        await service.from("posts").delete().eq("id", id);
+        throw e;
+      }
+    } else if (body.action === "finalize") {
+      const id = check(body.id, 36, "submission"),
+        token = check(body.token, 100, "upload token");
+      const post = await result(
+        service.from("posts").select("*").eq("id", id).single(),
+      );
+      if (
+        post.upload_token_hash !== (await hash(token)) ||
+        post.status !== "pending"
+      )
+        throw new Error("Upload verification failed.");
+      if (!post.uploaded) {
+        const meta = await result(
+          service.rpc("upload_metadata", { object_path: post.storage_path }),
+        );
+        if (
+          !meta ||
+          Number(meta.size) !== post.expected_size ||
+          meta.mimetype !== post.mime
+        )
+          throw new Error("Uploaded file does not match the submission.");
+        const signed = await result(
+          bucket.createSignedUrl(post.storage_path, 60),
+        );
+        const response = await fetch(signed.signedUrl, {
+          headers: { Range: "bytes=0-511" },
+        });
+        if (!response.ok || !response.body)
+          throw new Error("Could not verify media.");
+        const reader = response.body.getReader();
+        const chunks: number[] = [];
+        while (chunks.length < 512) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          chunks.push(...value.slice(0, 512 - chunks.length));
+        }
+        await reader.cancel();
+        if (!matchesMagic(new Uint8Array(chunks), post.mime)) {
+          await bucket.remove([post.storage_path]);
+          await service
+            .from("posts")
+            .update({ status: "rejected" })
+            .eq("id", id);
+          throw new Error(
+            "File contents do not match the selected media type.",
+          );
+        }
+        await result(
+          service
+            .from("posts")
+            .update({ uploaded: true })
+            .eq("id", id)
+            .eq("status", "pending"),
+        );
+      }
+      output = { success: true };
+    } else {
+      await authorize(req);
+      if (body.action === "list") {
+        if (!["pending", "approved"].includes(body.status))
+          throw new Error("Invalid status.");
+        const page =
+          Number.isInteger(body.page) && body.page >= 0 ? body.page : 0;
+        const posts = await result(
+          service
+            .from("posts")
+            .select(
+              "id,username,caption,storage_path,media_type,pinned,created_at",
+            )
+            .eq("status", body.status)
+            .eq("uploaded", true)
+            .order("created_at", { ascending: false })
+            .order("id")
+            .range(page * 20, page * 20 + 19),
+        );
+        const signed = posts.length
+          ? await result(
+              bucket.createSignedUrls(
+                posts.map((p) => p.storage_path),
+                3600,
+              ),
+            )
+          : [];
+        output = {
+          posts: posts.map((p, i) => ({ ...p, url: signed[i].signedUrl })),
+        };
+      } else {
+        const id = check(body.id, 36, "post");
+        if (body.action === "approve") {
+          const rows = await result(
+            service
+              .from("posts")
+              .update({
+                status: "approved",
+                approved_at: new Date().toISOString(),
+              })
+              .eq("id", id)
+              .eq("uploaded", true)
+              .eq("status", "pending")
+              .select("id"),
+          );
+          if (!rows.length)
+            throw new Error("This submission has already been reviewed.");
+        } else if (body.action === "reject") {
+          const rows = await result(
+            service
+              .from("posts")
+              .update({ status: "rejected" })
+              .eq("id", id)
+              .eq("status", "pending")
+              .select("storage_path"),
+          );
+          if (!rows.length)
+            throw new Error("This submission has already been reviewed.");
+          await result(bucket.remove(rows.map((p) => p.storage_path)));
+        } else if (body.action === "pin") {
+          if (typeof body.pinned !== "boolean")
+            throw new Error("Invalid pin state.");
+          const rows = await result(
+            service
+              .from("posts")
+              .update({ pinned: body.pinned })
+              .eq("id", id)
+              .eq("status", "approved")
+              .select("id"),
+          );
+          if (!rows.length) throw new Error("Post unavailable.");
+        } else throw new Error("Unknown action.");
+        output = { success: true };
+      }
+    }
+    return new Response(JSON.stringify(output), { headers });
+  } catch (e) {
+    return new Response(
+      JSON.stringify({
+        error: e instanceof Error ? e.message : "Request failed.",
+      }),
+      { status: 400, headers },
+    );
+  }
+});
+
