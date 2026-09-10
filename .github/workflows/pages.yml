@@ -1,0 +1,61 @@
+name: Publish Community Archive
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Import verified project source
+        if: hashFiles('archive-source.zip') != ''
+        id: import
+        shell: python
+        run: |
+          import hashlib, pathlib, zipfile
+          archive = pathlib.Path('archive-source.zip')
+          expected = '49cfe639c5542dc59a576478809fe2861b44ed675e9ab6dd7ca11a942272e790'
+          assert hashlib.sha256(archive.read_bytes()).hexdigest() == expected
+          root = pathlib.Path.cwd().resolve()
+          with zipfile.ZipFile(archive) as source:
+              for entry in source.infolist():
+                  target = (root / entry.filename).resolve()
+                  assert target.is_relative_to(root)
+                  assert not entry.filename.startswith(('.git/', '.github/'))
+              source.extractall(root)
+          migration = pathlib.Path('supabase/migrations/20260910_free_plan_limits.sql')
+          migration.write_text(migration.read_text().replace('drop constraint posts_expected_size_check', 'drop constraint if exists posts_expected_size_check'))
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Save imported source files
+        if: steps.import.outcome == 'success'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm archive-source.zip
+          git add index.html gallery submit messages adminpanel assets scripts tests supabase package.json package-lock.json README.md .gitignore .nojekyll
+          git commit -m "Install complete Community Archive source"
+          git push origin HEAD:main
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
