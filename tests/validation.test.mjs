@@ -318,6 +318,58 @@ test("the build takes credentials from the environment so CI works without a fil
   assert.ok(!/sb_publishable_|sb_secret_/.test(workflow), "a key is hardcoded in the workflow");
 });
 
+test("every stylesheet import is in a position a browser will honour", async () => {
+  // A browser drops @import that appears after any rule other than @charset or
+  // an @layer statement. Dropping is silent, so the whole theme vanishes and
+  // only global.css loads. This is the exact bug that broke the live site.
+  const css = await readFile("assets/css/global.css", "utf8");
+  const lines = css.split("\n");
+  const layerStatement = lines.findIndex((line) => /^@layer\s+[\w\s,]+;$/.test(line.trim()));
+  const firstImport = lines.findIndex((line) => line.trim().startsWith("@import"));
+  const lastImport = lines.map((line) => line.trim().startsWith("@import")).lastIndexOf(true);
+  assert.ok(firstImport >= 0, "global.css has no imports at all");
+
+  // Nothing that is not an import may sit between the layer statement and the
+  // last import, other than comments and blank lines.
+  const offenders = [];
+  for (let i = firstImport; i < lastImport; i++) {
+    const trimmed = lines[i].trim();
+    if (!trimmed || trimmed.startsWith("@import") || trimmed.startsWith("/*") || trimmed.endsWith("*/"))
+      continue;
+    offenders.push(`line ${i + 1}: ${trimmed}`);
+  }
+  assert.deepEqual(offenders, [], `@import must come first:\n${offenders.join("\n")}`);
+
+  // The layer statement is the one thing allowed above the imports.
+  for (let i = 0; i < firstImport; i++) {
+    const trimmed = lines[i].trim();
+    if (!trimmed || trimmed.startsWith("/*") || trimmed.endsWith("*/")) continue;
+    assert.ok(
+      /^@layer\s+[\w\s,]+;$/.test(trimmed),
+      `line ${i + 1} sits above the imports and is not an @layer statement: ${trimmed}`,
+    );
+  }
+  assert.ok(layerStatement >= 0 && layerStatement < firstImport, "the layer order is not declared first");
+
+  // Every imported file has to exist, or the browser gets a 404 and skips it.
+  const imports = [...css.matchAll(/@import\s+"\.\/([^"]+)"/g)].map((match) => match[1]);
+  assert.ok(imports.length >= 5, `expected the full set of partials, found ${imports.length}`);
+  for (const name of imports) {
+    await readFile(`assets/css/${name}`, "utf8");
+  }
+
+  // And the layer order has to mention every layer the partials use.
+  const order = css.match(/@layer\s+([\w\s,]+);/)[1].split(",").map((name) => name.trim());
+  for (const name of ["reset", "tokens", "base", "components", "motion", "utilities"])
+    assert.ok(order.includes(name), `the layer order is missing ${name}`);
+  for (const file of imports) {
+    const part = await readFile(`assets/css/${file}`, "utf8");
+    for (const match of part.matchAll(/@layer\s+([\w\s,]+)\s*\{/g))
+      for (const layer of match[1].split(","))
+        assert.ok(order.includes(layer.trim()), `${file} uses the undeclared layer "${layer.trim()}"`);
+  }
+});
+
 test("no em dashes anywhere in the interface copy", async () => {
   const files = [];
   for (const dir of ["assets/js", "assets/css", "src/pages", "supabase", "scripts"]) {

@@ -1,16 +1,18 @@
 /* Layer order is declared once, here. Everything else joins by name. */
 @layer reset, tokens, base, components, motion, utilities;
 
-/* Cross document page fades. Browsers without support just navigate. */
-@view-transition {
-  navigation: auto;
-}
-
+/* Every @import has to come before any other rule. Browsers silently drop
+   imports that appear after one, so nothing else may go above this block. */
 @import "./tokens.css";
 @import "./base.css";
 @import "./components.css";
 @import "./responsive.css";
 @import "./motion.css";
+
+/* Cross document page fades. Browsers without support just navigate. */
+@view-transition {
+  navigation: auto;
+}
 
 @layer utilities {
   .sr-only {
