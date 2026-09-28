@@ -1,5 +1,7 @@
-import { mkdir, rm, cp, writeFile, readFile, readdir, copyFile } from "node:fs/promises";
+import { mkdir, rm, cp, writeFile, readFile, readdir, copyFile, access } from "node:fs/promises";
+import { execSync } from "node:child_process";
 import { build } from "esbuild";
+import path from "node:path";
 
 const ACCENT = "#080808";
 
@@ -100,9 +102,15 @@ await build({
   outfile: "assets/vendor/supabase.js",
 });
 
-const document = (page, { title, description, content, prefix }) => {
+const document = (page, { title, description, content, prefix, version }) => {
   const robots =
     page === "adminpanel" ? '<meta name="robots" content="noindex,nofollow" />' : "";
+  // Every asset url carries the build version. Browsers cache stylesheets and
+  // modules aggressively, and a deployment that serves a new script with an
+  // old stylesheet renders a broken hybrid. A fresh query string makes that
+  // split impossible, because every deploy is a new set of urls.
+  const css = `${prefix}assets/css/global.css?v=${version}`;
+  const js = `${prefix}assets/js/app.js?v=${version}`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -115,9 +123,9 @@ ${robots}<meta name="referrer" content="strict-origin-when-cross-origin" />
 <meta name="theme-color" content="${ACCENT}" />
 <link rel="icon" href="${prefix}assets/favicon.svg" type="image/svg+xml" />
 <link rel="preload" href="${prefix}assets/fonts/inter-var.woff2" as="font" type="font/woff2" crossorigin />
-<link rel="stylesheet" href="${prefix}assets/css/global.css" />
-<link rel="modulepreload" href="${prefix}assets/js/app.js" />
-<script type="module" src="${prefix}assets/js/app.js"></script>
+<link rel="stylesheet" href="${css}" />
+<link rel="modulepreload" href="${js}" />
+<script type="module" src="${js}"></script>
 </head>
 <body data-page="${page}" data-title="${title}">
 <a class="skip" href="#main">Skip to content</a>
@@ -139,6 +147,16 @@ if (unknown.length)
   throw new Error(`These partials have no entry in scripts/build.mjs: ${unknown.join(", ")}`);
 
 const routes = [];
+// A short id for this exact build. Anything the browser caches is keyed on it,
+// so two deploys can never share an asset url.
+let version = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 8);
+if (!version) {
+  try {
+    version = execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
+  } catch {
+    version = Date.now().toString(36);
+  }
+}
 for (const page of available) {
   const { title, description } = pages[page];
   const content = (await readFile(`src/pages/${page}.html`, "utf8")).trim();
@@ -147,10 +165,11 @@ for (const page of available) {
   await mkdir(dir, { recursive: true });
   await writeFile(
     `${dir}/index.html`,
-    document(page, { title, description, content, prefix }),
+    document(page, { title, description, content, prefix, version }),
   );
   routes.push(dir);
 }
+console.log(`Build version ${version}.`);
 
 await writeFile(".nojekyll", "");
 await rm("dist", { recursive: true, force: true });
@@ -169,5 +188,43 @@ await writeFile(
   `export const config = Object.freeze(${JSON.stringify(settings, null, 2)});\n`,
   "utf8",
 );
+
+// Version every internal reference, not just the entry points. A module that
+// loads as app.js?v=abc still resolves import "./gallery.js" to the bare url,
+// so without this a deploy can serve a new entry with a cached dependency.
+// Only specifiers that resolve to a real file are touched, which keeps the
+// vendor bundle and any absolute url exactly as they are.
+async function versionReferences(dir, version) {
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await versionReferences(full, version);
+      continue;
+    }
+    const isJs = entry.name.endsWith(".js");
+    const isCss = entry.name.endsWith(".css");
+    if (!isJs && !isCss) continue;
+    let text = await readFile(full, "utf8");
+    const pattern = isJs
+      ? /((?:from|import)\s*\(?\s*|new\s+URL\s*\(\s*)["'](\.\/[^"']+?\.js)(["'])/g
+      : /(@import\s+)["'](\.\/[^"']+?\.css)(["'])/g;
+    let changed = false;
+    for (const hit of [...text.matchAll(pattern)]) {
+      const [whole, head, target, quote] = hit;
+      if (target.includes("?v=")) continue;
+      try {
+        await access(path.resolve(path.dirname(full), target));
+      } catch {
+        continue;
+      }
+      text = text.replace(whole, `${head}${quote}${target}?v=${version}${quote}`);
+      changed = true;
+    }
+    if (changed) await writeFile(full, text, "utf8");
+  }
+}
+
+// path and readFile need importing for the step above.
+await versionReferences("dist/assets", version);
 
 console.log(`Built ${routes.length} routes into dist/.`);

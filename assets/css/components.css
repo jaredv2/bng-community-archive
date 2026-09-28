@@ -787,6 +787,9 @@
     width: min(680px, calc(100vw - 32px));
     max-height: min(88dvh, 860px);
     padding: 0;
+    /* Explicit, because display:flex on a dialog must not rely on the
+       user agent keeping margin:auto working. */
+    margin: auto;
     box-shadow: var(--bevel-raised), var(--shadow-3);
     overflow: hidden;
   }
@@ -875,7 +878,11 @@
     position: relative;
     display: grid;
     place-items: center;
+    /* These let the grid actually constrain its child instead of being
+       stretched by it. Without them a tall image forces the stage open. */
+    min-width: 0;
     min-height: 0;
+    overflow: hidden;
     padding: 20px;
     background: #0a0a0a;
     border-bottom: 1px solid var(--border);

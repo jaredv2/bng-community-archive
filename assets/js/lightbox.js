@@ -40,9 +40,10 @@ export function mediaNode(post, { full = false, poster = true } = {}) {
   return node;
 }
 
-// Keeps ?post=<id> in the address bar so any view can be linked.
+// Keeps ?post=<id> in the address bar so any view can be linked. Clearing it
+// on close has to work even though current is already null by then, or a
+// reload reopens the viewer from the stale address.
 function syncUrl(post) {
-  if (!current) return;
   const target = url("gallery/");
   const next = post ? `${target}?post=${encodeURIComponent(post.id)}` : target;
   history.replaceState({ post: post?.id || null }, "", next);

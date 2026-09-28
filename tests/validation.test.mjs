@@ -517,6 +517,50 @@ test("a dialog's body is actually in the tree", async () => {
   assert.ok(/\.modal-top \{[^}]*padding:/.test(css), "the modal head has no padding");
 });
 
+test("closing the viewer always clears the shared address", async () => {
+  // syncUrl used to bail out when current was already null, but closeLightbox
+  // nulls current before calling it. The address stayed on ?post=, so a reload
+  // reopened the viewer and the memory could never really be left behind.
+  const js = await readFile("assets/js/lightbox.js", "utf8");
+  const sync = js.slice(js.indexOf("function syncUrl("), js.indexOf("}", js.indexOf("function syncUrl(")) + 1);
+  assert.ok(!sync.includes("if (!current)"), "syncUrl still refuses to clear when nothing is open");
+  const close = js.slice(js.indexOf("export function closeLightbox()"), js.indexOf("}", js.indexOf("syncUrl(null);")) + 1);
+  assert.ok(close.includes("current = null") && close.includes("syncUrl(null)"), "close does not clear the address");
+  assert.ok(
+    close.indexOf("current = null") < close.indexOf("syncUrl(null)"),
+    "close clears the address before dropping the reference",
+  );
+});
+
+test("every asset url carries the build version, so a deploy cannot split", async () => {
+  // A browser that holds app.js from one deploy and gallery.js from another
+  // renders a broken hybrid. Versioning only the entry points leaves every
+  // internal import on a bare url, so the whole graph has to be versioned.
+  const build = await readFile("scripts/build.mjs", "utf8");
+  assert.ok(build.includes("versionReferences"), "internal references are not versioned");
+  assert.ok(build.includes("new\\s+URL"), "worker urls are not versioned");
+
+  // The built output has to prove it. Rebuild if dist is absent.
+  let html;
+  try {
+    html = await readFile("dist/index.html", "utf8");
+  } catch {
+    return;
+  }
+  assert.ok(/global\.css\?v=[a-z0-9]+/.test(html), "the stylesheet has no version");
+  assert.ok(/app\.js\?v=[a-z0-9]+/.test(html), "the entry module has no version");
+  const app = await readFile("dist/assets/js/app.js", "utf8");
+  const bareJs = [...app.matchAll(/["'](\.\/[^"']+?\.js)(\?v=[a-z0-9]+)?["']/g)]
+    .filter((match) => !match[2])
+    .map((match) => match[1]);
+  assert.deepEqual(bareJs, [], `unversioned module imports in app.js: ${bareJs.join(", ")}`);
+  const css = await readFile("dist/assets/css/global.css", "utf8");
+  const bareCss = [...css.matchAll(/@import\s+"(\.\/[^"]+?\.css)(\?v=[a-z0-9]+)?"/g)]
+    .filter((match) => !match[2])
+    .map((match) => match[1]);
+  assert.deepEqual(bareCss, [], `unversioned css imports: ${bareCss.join(", ")}`);
+});
+
 test("no em dashes anywhere in the interface copy", async () => {
   const files = [];
   for (const dir of ["assets/js", "assets/css", "src/pages", "supabase", "scripts"]) {
