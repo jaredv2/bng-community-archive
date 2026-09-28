@@ -1,57 +1,51 @@
-import { connected, result } from "./supabase.js";
-import { openPost } from "./gallery.js";
+import { connected, result, signPosts } from "./data.js";
+import { openLightbox } from "./lightbox.js";
 
-// Optional browser support: this opens the same approved post viewer as a card.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const FIELDS =
+  "id,username,caption,storage_path,poster_path,media_type,width,height,likes,pinned,created_at,tags(name),comments(count)";
+
+// Lets an assistant open a memory directly. Browsers without this just skip it.
+export async function openById(id) {
+  if (typeof id !== "string" || !UUID.test(id)) throw new Error("A valid memory id is required.");
+  const post = await result(
+    connected()
+      .from("posts")
+      .select(FIELDS)
+      .eq("id", id)
+      .eq("status", "approved")
+      .single(),
+  );
+  const [signed] = await signPosts([post]);
+  openLightbox(signed, [signed]);
+  return { id: signed.id, username: signed.username };
+}
+
 const context = document.modelContext;
-if (
-  context?.registerTool &&
-  ["home", "gallery"].includes(document.body.dataset.page)
-) {
+if (context?.registerTool && ["home", "gallery", "search"].includes(document.body.dataset.page)) {
   const lifecycle = new AbortController();
   try {
     Promise.resolve(
       context.registerTool(
         {
-          name: "open_archive_post",
-          description:
-            "Open an approved Community Archive post in the visible post viewer.",
+          name: "open_archive_memory",
+          description: "Open an approved memory from the Community Archive in the viewer.",
           inputSchema: {
             type: "object",
             properties: { id: { type: "string", format: "uuid" } },
             required: ["id"],
             additionalProperties: false,
           },
-        annotations: { readOnlyHint: false, untrustedContentHint: true },
+          annotations: { readOnlyHint: false, untrustedContentHint: true },
           async execute(input) {
-            if (
-              !input ||
-              typeof input.id !== "string" ||
-              !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-                input.id,
-              )
-            )
-              throw new Error("A valid post UUID is required.");
-            const post = await result(
-              connected()
-                .from("posts")
-                .select(
-                  "id,username,caption,storage_path,media_type,likes,pinned,created_at",
-                )
-                .eq("id", input.id)
-                .eq("status", "approved")
-                .single(),
-            );
-            await openPost(post);
-            if (!document.querySelector("dialog[open]"))
-              throw new Error("Could not open the post.");
-            return { id: post.id, opened: true };
+            return openById(input?.id);
           },
         },
         { signal: lifecycle.signal },
       ),
     ).catch(() => {});
   } catch {
-    /* Browsers without this experimental capability keep the normal UI. */
+    /* Not supported in this browser. The normal UI is unaffected. */
   }
   window.addEventListener("pagehide", () => lifecycle.abort(), { once: true });
 }

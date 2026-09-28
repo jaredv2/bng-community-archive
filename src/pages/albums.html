@@ -1,0 +1,20 @@
+<header class="page-heading reveal">
+  <span class="eyebrow">Collected by everyone</span>
+  <h1>Albums.</h1>
+  <p>Group the archive by mood, event or whatever thread you are pulling on.</p>
+</header>
+
+<div class="toolbar reveal" style="--delay: 70ms">
+  <div class="filters" role="group" aria-label="Sort albums">
+    <button class="chip" data-sort="recent" aria-pressed="true">Newest</button>
+    <button class="chip" data-sort="size" aria-pressed="false">Largest</button>
+    <button class="chip" data-sort="name" aria-pressed="false">A to Z</button>
+  </div>
+  <button id="new-album" class="primary">New album <span aria-hidden="true">+</span></button>
+</div>
+
+<section aria-label="Albums">
+  <div id="albums" class="grid album-grid">
+    <div class="empty empty-compact empty-loading" role="status">Loading albums…</div>
+  </div>
+</section>

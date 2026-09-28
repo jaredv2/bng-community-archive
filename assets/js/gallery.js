@@ -1,199 +1,271 @@
-import { connected, result, mediaUrl, signPosts } from "./supabase.js";
-import { $, el, empty, busy, dialog, date, toast } from "./ui.js";
+import { connected, result, signPosts, ready } from "./data.js";
+import { $, $$, el, empty, showEmpty, date, url } from "./ui.js";
 import { config } from "./config.js";
-import { text } from "./validation.js";
-export function media(post, url = mediaUrl(post), full = false) {
-  const video = post.media_type === "video";
-  const n = el(video ? "video" : "img", "media");
-  n.src = url;
-  if (video) {
-    n.preload = "metadata";
-    n.controls = full;
-    n.playsInline = true;
-    if (!full) {
-      n.setAttribute("aria-label", "Video preview");
-      n.tabIndex = -1;
-    }
-  } else {
-    n.alt = post.caption;
-    n.loading = "lazy";
-    n.decoding = "async";
-  }
-  return n;
+import { mediaNode, openLightbox, readDeepLink, closeLightbox } from "./lightbox.js";
+import { observe, watchMedia, bindGif } from "./motion.js";
+import { play } from "./sound.js";
+
+const FIELDS =
+  "id,username,caption,storage_path,poster_path,media_type,width,height,likes,pinned,created_at,tags(name),comments(count)";
+
+function tagLinks(post) {
+  return (post.tags || []).map((tag) => {
+    const link = el("a", "tag-link", `#${tag.name}`);
+    link.href = url(`search/?tag=${encodeURIComponent(tag.name)}`);
+    link.dataset.sound = "tap";
+    return link;
+  });
 }
-export function card(post) {
+
+export function card(post, list) {
   const article = el("article", "post-card");
+  article.dataset.postId = post.id;
+
   const open = el("button", "media-button");
+  open.dataset.sound = "open";
   open.setAttribute(
     "aria-label",
-    `Open post by ${post.username}: ${post.caption}`,
+    `Open memory by ${post.username}: ${post.caption || post.media_type}`,
   );
-  open.append(media(post));
-  const type = el(
-    "span",
-    "media-tag",
-    post.pinned ? "↗ PINNED" : post.media_type.toUpperCase(),
+  open.append(mediaNode(post, { full: false, poster: true }));
+  open.append(
+    el("span", "media-tag", post.pinned ? "PINNED" : post.media_type.toUpperCase()),
   );
-  open.append(type);
-  open.onclick = () => openPost(post);
+  open.dataset.postId = post.id;
+  open.onclick = () => {
+    play("open");
+    openLightbox(post, list);
+  };
+
   const body = el("div", "post-body");
   const meta = el("div", "post-meta");
-  meta.append(
-    el("strong", "", post.username),
-    el("span", "muted", date(post.created_at)),
-  );
-  const caption = el("p", "caption", post.caption);
+  meta.append(el("strong", "", post.username), el("span", "muted", date(post.created_at)));
+  body.append(meta);
+  if (post.caption) body.append(el("p", "caption", post.caption));
+  if (post.tags?.length) {
+    const tagRow = el("div", "card-tags");
+    tagRow.append(...tagLinks(post));
+    body.append(tagRow);
+  }
+
+  const comments = post.comments?.[0]?.count || 0;
   const stats = el(
     "button",
-    "post-stats",
-    `♡ ${post.likes.toLocaleString()}  ·  ${post.comments?.[0]?.count || 0} comments`,
+    `post-stats ${post.liked ? "liked" : ""}`,
+    `♡ ${Number(post.likes || 0).toLocaleString()} · ${comments} comment${comments === 1 ? "" : "s"}`,
   );
-  stats.onclick = () => openPost(post);
-  body.append(meta, caption, stats);
+  stats.dataset.sound = "open";
+  stats.onclick = () => openLightbox(post, list);
+
+  body.append(stats);
   article.append(open, body);
   return article;
 }
-export async function loadGallery(
-  root,
-  limit = config.POSTS_PER_PAGE,
-  { home = false, status = "approved" } = {},
-) {
-  let page = 0,
-    loading = false;
-  const more = el("button", "load-more", "Load more");
-  const load = async () => {
-    if (loading) return;
-    loading = true;
-    more.disabled = true;
-    more.textContent = "Loading…";
-    try {
-      const posts = await result(
-        connected()
-          .from("posts")
-          .select(
-            "id,username,caption,storage_path,media_type,likes,pinned,created_at,comments(count)",
-          )
-          .eq("status", status)
-          .order("pinned", { ascending: false })
-          .order("approved_at", { ascending: false })
-          .order("id")
-          .range(page * limit, (page + 1) * limit - 1),
-      );
-      if (!page) root.replaceChildren();
-      (await signPosts(posts)).forEach((p) => root.append(card(p)));
-      if (!posts.length && !page)
-        empty(
-          root,
-          "No posts have been added yet. Your memories can start the archive.",
-        );
-      page++;
-      more.hidden = home || posts.length < limit;
-    } catch (e) {
-      if (!page) empty(root, e.message);
-      more.hidden = home;
-    } finally {
-      loading = false;
-      more.disabled = false;
-      more.textContent = "Load more";
-    }
-  };
-  if (!home) root.after(more);
-  more.onclick = load;
-  await load();
-}
-export async function openPost(post) {
-  try {
-    await displayPost(post);
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-async function displayPost(post) {
-  post = (await signPosts([post]))[0];
-  const d = dialog(post.username);
-  const content = el("div", "post-detail");
-  content.append(
-    media(post, mediaUrl(post), true),
-    el("p", "detail-caption", post.caption),
-  );
-  const like = el("button", "like", `♡ ${post.likes} likes`);
-  like.onclick = async () => {
-    like.disabled = true;
-    try {
-      post.likes = await result(
-        connected().rpc("increment_post_likes", { post_id: post.id }),
-      );
-      like.textContent = `♥ ${post.likes} likes`;
-    } catch (e) {
-      toast(e.message, true);
-    } finally {
-      like.disabled = false;
-    }
-  };
-  content.append(like, el("h3", "", "Conversation"));
-  const list = el("div", "comments");
-  content.append(list);
-  const more = el("button", "small", "Older conversation loaded · Show more");
-  more.hidden = true;
-  content.append(more);
-  let offset = 0;
-  const fetchComments = async (reset = false) => {
-    if (reset) {
-      offset = 0;
-      list.replaceChildren();
-    }
-    const rows = await result(
-      connected()
-        .from("comments")
-        .select("id,name,content,created_at")
-        .eq("post_id", post.id)
-        .order("created_at")
-        .order("id")
-        .range(offset, offset + 49),
-    );
-    if (!offset && !rows.length) empty(list, "No comments yet. Be the first.");
-    rows.forEach((row) => list.append(commentCard(row)));
-    offset += rows.length;
-    more.hidden = rows.length < 50;
-  };
-  more.onclick = () => busy(more, "Loading…", () => fetchComments());
-  const form = el("form", "stack");
-  form.innerHTML =
-    '<label>Name<input name="name" required maxlength="60" autocomplete="nickname"></label><label>Comment<textarea name="content" required maxlength="2000" rows="3" placeholder="Add to the memory…"></textarea></label><button class="primary">Post comment</button>';
-  form.onsubmit = (e) => {
-    e.preventDefault();
-    busy($("button", form), "Posting comment…", async () => {
-      const data = new FormData(form);
-      await result(
-        connected()
-          .from("comments")
-          .insert({
-            post_id: post.id,
-            name: text(data.get("name"), 60, "Name"),
-            content: text(data.get("content"), 2000, "Comment"),
-          }),
-      );
-      form.reset();
-      await fetchComments(true);
-      toast("Comment posted.");
+
+export async function loadGallery(root, options = {}) {
+  const { limit = config.POSTS_PER_PAGE, home = false, filter = "all", tag = null } = options;
+  if (!ready()) {
+    showEmpty(root, {
+      icon: "⚡",
+      title: "Not connected yet",
+      body: "The archive cannot reach the store right now. Give it a moment and refresh.",
     });
-  };
-  content.append(form);
-  d.append(content);
-  d.showModal();
-  try {
-    await fetchComments();
-  } catch (e) {
-    empty(list, e.message);
+    return;
   }
-}
-export function commentCard(row) {
-  const n = el("article", "message");
-  const meta = el("div", "post-meta");
-  meta.append(
-    el("strong", "", row.name),
-    el("time", "muted", date(row.created_at)),
-  );
-  n.append(meta, el("p", "", row.content));
-  return n;
+
+  const loaded = [];
+  let page = 0;
+  let busyLoading = false;
+  let filterValue = filter;
+  let tagValue = tag;
+
+  const count = $("#gallery-count");
+  const sentinel = $("#sentinel");
+  const more = $("#gallery-more");
+  const filterButtons = $$('[data-filter]');
+
+  function applyFilterButtons() {
+    filterButtons.forEach((button) =>
+      button.setAttribute("aria-pressed", String(button.dataset.filter === filterValue)),
+    );
+  }
+  filterButtons.forEach((button) => {
+    button.onclick = () => {
+      filterValue = button.dataset.filter;
+      applyFilterButtons();
+      play("tap");
+      reset();
+    };
+  });
+  applyFilterButtons();
+
+  function reset() {
+    page = 0;
+    loaded.length = 0;
+    if (sentinel) observer?.disconnect();
+  }
+
+  // Called whenever a render produced nothing, so a grid is never left blank.
+  function renderEmpty(onShowAll) {
+    root.classList.remove("stagger", "in");
+    if (tagValue) {
+      return showEmpty(root, {
+        icon: "#",
+        title: `Nothing tagged #${tagValue}`,
+        body: "No memory carries that tag yet. Browse everything, or add the first one.",
+        action: "Browse all memories",
+        href: url("gallery/"),
+      });
+    }
+    if (filterValue !== "all") {
+      const label = { image: "photos", gif: "GIFs", video: "clips" }[filterValue] || filterValue;
+      return showEmpty(root, {
+        icon: "▦",
+        title: `No ${label} yet`,
+        body: `Nothing in the archive is a ${label === "GIFs" ? "GIF" : label.replace(/s$/, "")} so far. Try another filter.`,
+        action: "Show everything",
+      });
+    }
+    showEmpty(root, {
+      icon: "▦",
+      title: "The archive is empty",
+      body: home
+        ? "Nothing has been shared yet. The first memory starts the whole collection."
+        : "Nothing has been shared yet. Yours can be the first one on the shelf.",
+      action: home ? null : "Share something",
+      href: url("submit/"),
+    });
+  }
+
+  function render(posts, onShowAll) {
+    const wanted =
+      filterValue === "all"
+        ? posts
+        : posts.filter((post) =>
+            post.media_type === filterValue ||
+            (filterValue === "image" && post.media_type === "image"),
+          );
+    const batch = [];
+    for (const post of wanted) {
+      if (tagValue && !(post.tags || []).some((tag) => tag.name === tagValue)) continue;
+      loaded.push(post);
+      batch.push(card(post, loaded));
+    }
+    root.append(...batch);
+    if (batch.length) {
+      root.classList.add("stagger");
+      batch.forEach((node, i) => {
+        node.style.setProperty("--i", String(i));
+      });
+      requestAnimationFrame(() => root.classList.add("in"));
+    } else if (!loaded.length) {
+      renderEmpty(onShowAll);
+    }
+    if (count)
+      count.textContent = loaded.length
+        ? `${loaded.length} memor${loaded.length === 1 ? "y" : "ies"}`
+        : "";
+    bindGif(root);
+    watchMedia(root);
+    observe(root);
+  }
+
+  async function load() {
+    if (busyLoading) return;
+    busyLoading = true;
+    if (more) {
+      more.disabled = true;
+      more.textContent = "Loading…";
+    }
+    try {
+      let query = connected()
+        .from("posts")
+        .select(FIELDS)
+        .eq("status", "approved")
+        .order("pinned", { ascending: false })
+        .order("approved_at", { ascending: false })
+        .order("id")
+        .range(page * limit, (page + 1) * limit - 1);
+      if (tagValue) query = query.eq("tags.name", tagValue);
+      const posts = await signPosts(await result(query));
+      if (!page) {
+        root.replaceChildren();
+        root.classList.remove("in");
+      }
+      render(posts, () => {
+        filterValue = "all";
+        applyFilterButtons();
+        reset();
+        load();
+      });
+      page++;
+      const done = posts.length < limit;
+      if (more) more.hidden = home || done;
+      if (sentinel) done ? observer?.unobserve(sentinel) : observeSentinel();
+    } catch (error) {
+      if (!page) {
+        showEmpty(root, {
+          icon: "!",
+          title: "Could not load the gallery",
+          body: error.message,
+        });
+      }
+      if (more) more.hidden = true;
+    } finally {
+      busyLoading = false;
+      if (more) {
+        more.disabled = false;
+        more.textContent = "Load more";
+      }
+    }
+  }
+
+  let observer = null;
+  function observeSentinel() {
+    if (!sentinel || !("IntersectionObserver" in window)) return;
+    if (!observer) {
+      observer = new IntersectionObserver(
+        (entries) => {
+          if (entries.some((entry) => entry.isIntersecting)) load();
+        },
+        { rootMargin: "400px" },
+      );
+    }
+    observer.observe(sentinel);
+  }
+
+  if (more) more.onclick = () => load();
+  if (!home) await load();
+  else {
+    // Home shows a fixed slice with no pagination controls, but it still needs
+    // the empty placeholder when there is nothing to show.
+    try {
+      const posts = await signPosts(
+        await result(
+          connected()
+            .from("posts")
+            .select(FIELDS)
+            .eq("status", "approved")
+            .order("pinned", { ascending: false })
+            .order("approved_at", { ascending: false })
+            .limit(3),
+        ),
+      );
+      root.replaceChildren();
+      render(posts);
+    } catch (error) {
+      showEmpty(root, { icon: "!", title: "Could not load the archive", body: error.message });
+    }
+  }
+
+  if (home) return loaded;
+
+  // Restore a shared link straight into the viewer.
+  const target = readDeepLink(loaded);
+  if (target) openLightbox(target, loaded);
+  window.addEventListener("popstate", () => {
+    if (location.search.includes("post=")) return;
+    closeLightbox();
+  });
+  return loaded;
 }

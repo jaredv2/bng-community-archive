@@ -1,27 +1,86 @@
-import { mkdir, rm, cp, writeFile, readFile } from "node:fs/promises";
+import { mkdir, rm, cp, writeFile, readFile, readdir, copyFile } from "node:fs/promises";
 import { build } from "esbuild";
+
+const ACCENT = "#080808";
+
+// Reads KEY=value pairs from .env without pulling in a dependency.
+// Real environment variables win, which is how CI supplies them.
+async function readEnv() {
+  const out = {};
+  try {
+    const raw = await readFile(".env", "utf8");
+    for (const line of raw.split("\n")) {
+      const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
+      if (!match) continue;
+      out[match[1]] = match[2].replace(/^["']|["']$/g, "");
+    }
+  } catch {
+    /* no file, the environment may still carry the values */
+  }
+  for (const [key, value] of Object.entries(process.env))
+    if (key.startsWith("ARCHIVE_") && value) out[key] = value;
+  return out;
+}
+
+const env = await readEnv();
+
+// Values live in .env, which is gitignored. They are written only into dist,
+// so a real key never lands in a tracked file or in a commit.
+const settings = {
+  API_URL: env.ARCHIVE_API_URL || "REPLACE_WITH_PROJECT_URL",
+  API_KEY: env.ARCHIVE_API_KEY || "REPLACE_WITH_PROJECT_KEY",
+  SITE_NAME: env.ARCHIVE_SITE_NAME || "Community Archive",
+  ARCHIVE_NAME: env.ARCHIVE_NAME || "BNG",
+  // These must stay in step with assets/js/config.js.
+  MAX_IMAGE_SIZE: 25 * 1024 * 1024,
+  MAX_VIDEO_SIZE: 50 * 1024 * 1024,
+  POSTS_PER_PAGE: 20,
+  MAX_TAGS: 5,
+  COMMENTS_PER_PAGE: 50,
+};
+
+const missing = Object.entries(settings)
+  .filter(([key, value]) => key.startsWith("API_") && value.startsWith("REPLACE_WITH"))
+  .map(([key]) => key);
+if (missing.length)
+  throw new Error(
+    `Missing ${missing.join(" and ")}. Copy .env.example to .env and fill it in, then build again.`,
+  );
+
+
 const pages = {
   home: {
     title: "Home",
-    content: `<section class="hero"><div><h1>Community<br>Archive<span class="muted">.</span></h1><div class="actions"><a class="button primary" data-href="gallery/">View gallery <span aria-hidden="true">↗</span></a><a class="button" data-href="submit/">Submit something</a></div></div></section><section class="section"><div class="section-heading"><h2>From the archive</h2><a class="text-link" data-href="gallery/">Explore all memories ↗</a></div><div id="posts" class="grid"><div class="empty">Loading memories…</div></div></section><section class="section"><div class="section-heading"><h2>A few words from everyone</h2><a class="text-link" data-href="messages/">Leave a message ↗</a></div><div id="messages" class="message-grid"><div class="empty">Loading messages…</div></div></section>`,
+    description: "Photos, clips and memories from our community.",
   },
   gallery: {
     title: "Gallery",
-    content: `<header class="page-heading"><span class="eyebrow">The shared camera roll</span><h1>The gallery.</h1><p>Our moments, big and small. Pinned memories come first.</p></header><section aria-label="Gallery posts"><div id="posts" class="grid"><div class="empty">Loading gallery…</div></div></section>`,
+    description: "Every photo, GIF and clip the community has shared.",
+  },
+  albums: {
+    title: "Albums",
+    description: "Collections of memories, grouped by the community.",
+  },
+  search: {
+    title: "Search",
+    description: "Search every caption, name and tag in the archive.",
   },
   submit: {
     title: "Submit",
-    content: `<div class="narrow"><header class="page-heading"><span class="eyebrow">Add to the collection</span><h1>Got a memory?</h1><p>Share a photo, GIF or clip. Every submission is reviewed before it joins the archive.</p></header><form id="submit-form" class="form-card stack"><label>Your name<input name="username" required maxlength="60" placeholder="What should we call you?" autocomplete="nickname"></label><label>Caption<textarea name="caption" required maxlength="1000" rows="3" placeholder="A little context for this moment…"></textarea></label><div id="dropzone" class="dropzone"><span class="upload-symbol" aria-hidden="true">↥</span><strong>Drop your memory here</strong><label class="button" for="file">Choose file<input id="file" type="file" accept=".jpg,.jpeg,.png,.webp,.gif,.mp4,.webm"></label><p class="hint">JPG, PNG, WebP, GIF · up to 20 MB<br>MP4, WebM · up to 50 MB</p></div><div id="preview"></div><progress id="upload-progress" max="100" value="0" hidden aria-label="Upload progress"></progress><div id="upload-label" role="status"></div><button id="submit-button" class="primary">Send for approval ↗</button><p class="hint">Only share media you have permission to share.</p></form></div>`,
+    description: "Share a photo, GIF or clip with the community.",
   },
   messages: {
     title: "Messages",
-    content: `<div class="narrow"><header class="page-heading center"><span class="eyebrow">The community wall</span><h1>Leave a Message</h1><p>A hello, an inside joke, or something to remember.</p></header><form id="message-form" class="form-card stack"><label>Name<input name="name" required maxlength="60" autocomplete="nickname" placeholder="Your name"></label><label>Message<textarea name="content" required maxlength="2000" rows="5" placeholder="Leave a few words…"></textarea></label><button class="primary">Post Message ↗</button></form><section aria-label="Public messages"><div class="section-heading"><h2>From the community</h2><span class="eyebrow">Open to everyone</span></div><div id="messages"><div class="empty">Loading messages…</div></div></section></div>`,
+    description: "A wall of messages from everyone in the community.",
   },
   adminpanel: {
     title: "Admin Access",
-    content: `<header class="page-heading"><span class="eyebrow">Community Archive</span><h1>Admin Access</h1></header><form id="admin-login" class="form-card stack narrow"><p id="admin-status" class="muted" role="status">Sign in to review submissions.</p><label>Email<input type="email" name="email" required autocomplete="username"></label><label>Password<input type="password" name="password" required autocomplete="current-password"></label><button class="primary">Unlock</button></form><section id="dashboard" hidden><div class="section-heading"><h2>Review the archive</h2><button id="logout">Logout</button></div><div class="tabs" aria-label="Submission status"><button data-status="pending" aria-pressed="true">Pending</button><button data-status="approved" aria-pressed="false">Approved</button></div><div id="admin-posts" class="grid"></div><button id="admin-more" class="load-more" hidden>Load more</button></section>`,
+    description: "Moderation.",
   },
 };
+
+const SITE_NAME = settings.SITE_NAME;
+
 await mkdir("assets/vendor", { recursive: true });
 await build({
   entryPoints: ["node_modules/@supabase/supabase-js/dist/module/index.js"],
@@ -31,27 +90,75 @@ await build({
   minify: true,
   outfile: "assets/vendor/supabase.js",
 });
-for (const [page, { title, content }] of Object.entries(pages)) {
+
+const document = (page, { title, description, content, prefix }) => {
+  const robots =
+    page === "adminpanel" ? '<meta name="robots" content="noindex,nofollow" />' : "";
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>${title} · ${SITE_NAME}</title>
+<meta name="description" content="${description}" />
+${robots}<meta name="referrer" content="strict-origin-when-cross-origin" />
+<meta name="color-scheme" content="dark" />
+<meta name="theme-color" content="${ACCENT}" />
+<link rel="icon" href="${prefix}assets/favicon.svg" type="image/svg+xml" />
+<link rel="preload" href="${prefix}assets/fonts/inter-var.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="stylesheet" href="${prefix}assets/css/global.css" />
+<link rel="modulepreload" href="${prefix}assets/js/app.js" />
+<script type="module" src="${prefix}assets/js/app.js"></script>
+</head>
+<body data-page="${page}" data-title="${title}">
+<a class="skip" href="#main">Skip to content</a>
+<main id="main" tabindex="-1">
+${content}
+</main>
+<noscript><p class="noscript">This archive needs JavaScript to load posts and send submissions.</p></noscript>
+</body>
+</html>
+`;
+};
+
+const available = (await readdir("src/pages"))
+  .filter((file) => file.endsWith(".html"))
+  .map((file) => file.replace(/\.html$/, ""));
+
+const unknown = available.filter((page) => !(page in pages));
+if (unknown.length)
+  throw new Error(`These partials have no entry in scripts/build.mjs: ${unknown.join(", ")}`);
+
+const routes = [];
+for (const page of available) {
+  const { title, description } = pages[page];
+  const content = (await readFile(`src/pages/${page}.html`, "utf8")).trim();
   const dir = page === "home" ? "." : page;
   const prefix = page === "home" ? "./" : "../";
   await mkdir(dir, { recursive: true });
   await writeFile(
     `${dir}/index.html`,
-    `<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Photos, clips and memories from our community.">${page === "adminpanel" ? '<meta name="robots" content="noindex,nofollow">' : ""}<meta name="referrer" content="strict-origin-when-cross-origin"><meta name="theme-color" content="#080808"><title>${title} · Community Archive</title><link rel="icon" href="${prefix}assets/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="${prefix}assets/css/global.css"><script type="module" src="${prefix}assets/js/app.js"></script></head><body data-page="${page}" data-title="${title}"><a class="skip" href="#main">Skip to content</a><main id="main">${content}</main><noscript><p>This archive needs JavaScript to load posts and send submissions.</p></noscript></body></html>\n`,
+    document(page, { title, description, content, prefix }),
   );
+  routes.push(dir);
 }
+
 await writeFile(".nojekyll", "");
 await rm("dist", { recursive: true, force: true });
 await mkdir("dist");
-for (const path of [
-  "index.html",
-  "gallery",
-  "submit",
-  "messages",
-  "adminpanel",
-  "assets",
-  ".nojekyll",
-])
-  await cp(path, `dist/${path}`, { recursive: true });
-console.log("Built all five static routes into dist/.");
+for (const route of routes) {
+  // The home route is ".", which cannot be copied into its own subdirectory.
+  if (route === ".") await copyFile("index.html", "dist/index.html");
+  else await cp(route, `dist/${route}`, { recursive: true });
+}
+await cp("assets", "dist/assets", { recursive: true });
+await copyFile(".nojekyll", "dist/.nojekyll");
 
+// The only place a real key is ever written, and it is gitignored.
+await writeFile(
+  "dist/assets/js/config.js",
+  `export const config = Object.freeze(${JSON.stringify(settings, null, 2)});\n`,
+  "utf8",
+);
+
+console.log(`Built ${routes.length} routes into dist/.`);

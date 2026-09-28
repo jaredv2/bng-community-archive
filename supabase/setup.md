@@ -1,7 +1,24 @@
-# Supabase setup
+# Backend setup
 
-Follow the complete [project setup guide](../README.md).
+Apply these three files as the database owner, in order:
 
-Apply SQL in order: `schema.sql` → `functions.sql` → `policies.sql`. The policies file creates the private Storage bucket and its RLS policy. Create an Auth user, add its UUID to `archive_admins`, configure allowed origins, and deploy `archive` with the CLI commands in the guide.
+1. `schema.sql` - tables, constraints, indexes, realtime
+2. `functions.sql` - security definer helpers, each with a fixed search_path
+3. `policies.sql` - grants, row level security, the two storage buckets
 
-No admin password or service-role key belongs in frontend configuration. The only browser configuration is `assets/js/config.js` with the project URL and public anon key.
+`policies.sql` creates both private buckets: `community-media` for the original
+uploads and `community-posters` for the small stills generated in the browser.
+Neither is public. A memory becomes readable only once it is approved.
+
+Then:
+
+- create an Auth user, and grant it admin rights:
+  `insert into public.archive_admins values ('USER-UUID');`
+- set function secrets from `.env.example` and deploy with `--no-verify-jwt`
+
+`schema.sql` and `functions.sql` have no destructive statements, so they are
+safe to re-apply to an existing project. `policies.sql` creates policies, so
+drop the named policy first if you re-apply it.
+
+The only configuration the browser receives is the project URL and the
+publishable key, injected into `dist/` at build time from `.env`.

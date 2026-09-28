@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Search · Community Archive</title>
+<meta name="description" content="Search every caption, name and tag in the archive." />
+<meta name="referrer" content="strict-origin-when-cross-origin" />
+<meta name="color-scheme" content="dark" />
+<meta name="theme-color" content="#080808" />
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+<link rel="preload" href="../assets/fonts/inter-var.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="stylesheet" href="../assets/css/global.css" />
+<link rel="modulepreload" href="../assets/js/app.js" />
+<script type="module" src="../assets/js/app.js"></script>
+</head>
+<body data-page="search" data-title="Search">
+<a class="skip" href="#main">Skip to content</a>
+<main id="main" tabindex="-1">
+<div class="narrow">
+  <header class="page-heading reveal">
+    <span class="eyebrow">Search</span>
+    <h1>Find a memory.</h1>
+    <p>Look through captions, names, tags and albums.</p>
+  </header>
+
+  <form id="search-form" class="form-card search-card reveal" style="--delay: 70ms" role="search" novalidate>
+    <div class="search-bar">
+      <span class="search-icon" aria-hidden="true">⌕</span>
+      <input id="q" name="q" type="search" placeholder="Search the archive…" autocomplete="off" aria-label="Search the archive" />
+      <button id="clear" class="icon-button" type="button" aria-label="Clear search" hidden>×</button>
+    </div>
+    <div class="filters" role="group" aria-label="Filters">
+      <button class="chip" data-filter="all" aria-pressed="true">Everything</button>
+      <button class="chip" data-filter="image" aria-pressed="false">Photos</button>
+      <button class="chip" data-filter="gif" aria-pressed="false">GIFs</button>
+      <button class="chip" data-filter="video" aria-pressed="false">Clips</button>
+    </div>
+    <div class="filters" role="group" aria-label="Date range">
+      <button class="chip" data-date="all" aria-pressed="true">Any time</button>
+      <button class="chip" data-date="30" aria-pressed="false">Past month</button>
+      <button class="chip" data-date="365" aria-pressed="false">Past year</button>
+    </div>
+  </form>
+
+  <p id="search-status" class="result-count" role="status" aria-live="polite"></p>
+
+  <section aria-label="Search results">
+    <div id="results" class="grid" data-masonry>
+      <div class="empty empty-loading"><span class="empty-mark" aria-hidden="true">&#8981;</span><h3 class="empty-title">Search the whole archive</h3><p class="empty-body">Type a name, a caption or a tag. Everything in the collection is searchable.</p></div>
+    </div>
+  </section>
+</div>
+</main>
+<noscript><p class="noscript">This archive needs JavaScript to load posts and send submissions.</p></noscript>
+</body>
+</html>

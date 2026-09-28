@@ -1,0 +1,79 @@
+/* Design tokens. One dark theme, no gradients, bevels built from layered shadows. */
+@layer tokens {
+  @font-face {
+    font-family: "Inter Variable";
+    src: url("../fonts/inter-var.woff2") format("woff2");
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+    font-named-instance: "Inter Variable";
+  }
+
+  :root {
+    color-scheme: dark;
+
+    --bg: #080808;
+    --surface: #101010;
+    --raised: #171717;
+    --raised-hi: #1f1f1f;
+    --border: #262626;
+    --border-hi: #383838;
+    --text: #f5f5f3;
+    --text-dim: #c4c4c0;
+    --sheen: #9a9a94;
+    --muted: #9b9b98;
+    --muted-dim: #77776f;
+    --accent: #f4f4f1;
+    --on-accent: #0c0c0c;
+    --danger: #f0a8a8;
+    --danger-bg: #241717;
+    --danger-border: #5e3535;
+    --mark: #3a3a2c;
+    --mark-text: #f0e8c8;
+    --overlay: #000000c4;
+
+    --bevel-hi: #ffffff0f;
+    --bevel-lo: #00000073;
+    --bevel: inset 0 1px 0 var(--bevel-hi), inset 0 -1px 0 var(--bevel-lo);
+    --bevel-raised: inset 0 1px 0 #ffffff14, inset 0 -1px 0 #00000080;
+    --bevel-sunk: inset 0 2px 4px #000000a6, inset 0 -1px 0 #ffffff0a;
+
+    --shadow-1: 0 1px 2px #00000059;
+    --shadow-2: 0 6px 18px #00000066;
+    --shadow-3: 0 18px 48px #00000080;
+
+    --r-sm: 7px;
+    --r-md: 10px;
+    --r-lg: 14px;
+    --r-xl: 18px;
+
+    --gutter: 36px;
+    --gap: 24px;
+    --measure: 730px;
+    --shell: 1240px;
+    --tap: 46px;
+
+    --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-in: cubic-bezier(0.55, 0, 0.65, 0.2);
+    --t-fast: 120ms;
+    --t-mid: 200ms;
+    --t-slow: 340ms;
+    --t-reveal: 520ms;
+
+    --font: "Inter Variable", Inter, Arial, Helvetica, sans-serif;
+  }
+
+  @media (max-width: 900px) {
+    :root {
+      --gutter: 28px;
+      --gap: 20px;
+    }
+  }
+  @media (max-width: 640px) {
+    :root {
+      --gutter: 20px;
+      --gap: 16px;
+    }
+  }
+}

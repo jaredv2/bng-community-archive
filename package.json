@@ -1,11 +1,11 @@
 {
-  "name": "community-archive",
+  "name": "bng-community-archive",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test tests/*.test.mjs",
-    "dev": "node scripts/serve.mjs"
+    "dev": "node scripts/build.mjs && node scripts/serve.mjs",
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.57.4"

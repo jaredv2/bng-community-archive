@@ -1,0 +1,210 @@
+/* Layout at smaller widths. Kept in one file so the breakpoints stay findable. */
+@layer components {
+  @media (max-width: 900px) {
+    .grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .message-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .hero {
+      grid-template-columns: 1fr;
+      gap: 36px;
+      padding: 64px 0 52px;
+    }
+    .hero-aside {
+      border-left: 0;
+      border-top: 1px solid var(--border);
+      padding: 26px 0 0;
+    }
+    .archive-mark {
+      font-size: 2.6rem;
+    }
+    .toolbar {
+      padding-bottom: 22px;
+    }
+  }
+
+  @media (max-width: 720px) {
+    /* The nav collapses behind the Menu button. shell() toggles .open. */
+    .nav-wrap {
+      min-height: 74px;
+      flex-wrap: wrap;
+      gap: 0 16px;
+    }
+    .menu-toggle {
+      display: inline-flex;
+      order: 3;
+      margin-left: auto;
+      min-height: 38px;
+      padding: 6px 14px;
+      font-size: 0.8rem;
+    }
+    .brand {
+      font-size: 0.72rem;
+    }
+    nav {
+      order: 4;
+      display: none;
+      width: 100%;
+      flex-direction: column;
+      gap: 2px;
+      padding: 12px 0 18px;
+    }
+    nav.open {
+      display: flex;
+    }
+    nav a {
+      padding: 11px 12px;
+      border-radius: var(--r-sm);
+    }
+    nav a[aria-current="page"]::after {
+      left: 12px;
+      right: auto;
+      width: 16px;
+      bottom: 6px;
+    }
+    .page-heading {
+      padding: 40px 0 26px;
+    }
+    .form-card {
+      padding: 20px;
+      border-radius: var(--r-lg);
+    }
+    .stack > button[type="submit"] {
+      align-self: stretch;
+    }
+    .message-grid,
+    .grid {
+      grid-template-columns: 1fr;
+    }
+    .section {
+      padding: 26px 0 34px;
+    }
+    .section-heading {
+      flex-wrap: wrap;
+      gap: 8px 16px;
+    }
+    .filters {
+      gap: 7px;
+    }
+    .chip {
+      min-height: 36px;
+      padding: 5px 13px;
+      font-size: 0.82rem;
+    }
+    .modal {
+      padding: 18px;
+      width: calc(100% - 16px);
+      border-radius: var(--r-lg);
+    }
+    .modal-top {
+      margin-bottom: 14px;
+    }
+    .lightbox {
+      width: 100%;
+      max-width: 100%;
+      height: 100dvh;
+      max-height: 100dvh;
+      border-radius: 0;
+      border: 0;
+    }
+    .lb-stage {
+      border-radius: 0;
+      max-height: 58dvh;
+    }
+    .lb-stage .media {
+      max-height: 58dvh;
+    }
+    .lb-bar {
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+    }
+    .lb-info {
+      order: -1;
+      width: 100%;
+    }
+    .lb-caption {
+      max-height: 18dvh;
+    }
+    .lb-arrow {
+      width: 40px;
+      min-height: 40px;
+    }
+    .lb-arrow.prev {
+      left: 6px;
+    }
+    .lb-arrow.next {
+      right: 6px;
+    }
+    .filmstrip {
+      padding: 10px 12px;
+    }
+    .row {
+      align-items: stretch;
+    }
+    .row-actions {
+      width: 100%;
+    }
+    .row-actions button {
+      flex: 1;
+    }
+    .empty {
+      padding: 44px 18px 40px;
+    }
+    #toasts {
+      left: 16px;
+      right: 16px;
+      bottom: 16px;
+      max-width: none;
+    }
+    footer {
+      flex-direction: column;
+    }
+    .footer-top {
+      flex-direction: column;
+      gap: 6px;
+    }
+  }
+
+  @media (max-width: 420px) {
+    .hero h1 {
+      font-size: 2.8rem;
+    }
+    .actions .button {
+      flex: 1;
+      padding: 11px 14px;
+      font-size: 0.86rem;
+    }
+    .grid {
+      gap: 14px;
+    }
+    .post-body {
+      padding: 14px 15px 16px;
+    }
+    .post-meta {
+      flex-direction: row;
+    }
+  }
+
+  /* A forced colour scheme drops the bevels, so lean on the border instead. */
+  @media (forced-colors: active) {
+    .post-card,
+    .message,
+    .album-card,
+    .admin-card,
+    .form-card,
+    .empty,
+    button,
+    .button,
+    .empty-mark {
+      box-shadow: none;
+      border: 1px solid ButtonBorder;
+    }
+    .card-tags .tag-link,
+    .chip {
+      border: 1px solid ButtonBorder;
+    }
+  }
+}

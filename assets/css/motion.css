@@ -1,0 +1,223 @@
+@layer motion {
+  /* Scroll reveals. Elements start shifted and faded, then settle. */
+  .reveal {
+    opacity: 0;
+    transform: translateY(14px);
+    transition:
+      opacity var(--t-reveal) var(--ease-out),
+      transform var(--t-reveal) var(--ease-out);
+    transition-delay: var(--delay, 0ms);
+  }
+  .reveal.in {
+    opacity: 1;
+    transform: none;
+  }
+  .stagger > * {
+    opacity: 0;
+    transform: translateY(16px) scale(0.985);
+  }
+  .stagger.in > * {
+    opacity: 1;
+    transform: none;
+    transition:
+      opacity var(--t-reveal) var(--ease-out),
+      transform var(--t-reveal) var(--ease-out);
+    transition-delay: calc(var(--i, 0) * 45ms);
+  }
+  .stagger > *:nth-child(1) { --i: 0; }
+  .stagger > *:nth-child(2) { --i: 1; }
+  .stagger > *:nth-child(3) { --i: 2; }
+  .stagger > *:nth-child(4) { --i: 3; }
+  .stagger > *:nth-child(5) { --i: 4; }
+  .stagger > *:nth-child(6) { --i: 5; }
+  .stagger > *:nth-child(7) { --i: 6; }
+  .stagger > *:nth-child(8) { --i: 7; }
+  .stagger > *:nth-child(9) { --i: 8; }
+
+  /* Dialog entry and exit. */
+  .modal[open] {
+    animation: modal-in var(--t-slow) var(--ease-out) both;
+  }
+  .modal[open]::backdrop {
+    animation: fade-in var(--t-mid) var(--ease) both;
+  }
+  .modal.closing {
+    animation: modal-out 180ms var(--ease-in) both;
+  }
+  .modal.closing::backdrop {
+    animation: fade-out 180ms var(--ease-in) both;
+  }
+  @keyframes modal-in {
+    from {
+      opacity: 0;
+      transform: translateY(16px) scale(0.97);
+    }
+  }
+  @keyframes modal-out {
+    to {
+      opacity: 0;
+      transform: translateY(8px) scale(0.985);
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes fade-out {
+    to {
+      opacity: 0;
+    }
+  }
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+  }
+  @keyframes pop {
+    0% {
+      transform: scale(1);
+    }
+    45% {
+      transform: scale(1.16);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+  @keyframes heart {
+    0% {
+      transform: scale(1);
+    }
+    30% {
+      transform: scale(1.3);
+    }
+    60% {
+      transform: scale(0.94);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+  @keyframes bar {
+    from {
+      transform: scaleX(0);
+    }
+  }
+  @keyframes slide-in {
+    from {
+      opacity: 0;
+      transform: translateX(18px);
+    }
+  }
+  .toast {
+    animation: slide-in var(--t-slow) var(--ease-out) both;
+  }
+  .like.pinged {
+    animation: heart 420ms var(--ease-out);
+  }
+  .progress-block progress {
+    animation: fade-in var(--t-mid) var(--ease) both;
+  }
+  .brand-mark {
+    display: inline-block;
+  }
+
+  /* Shimmer used while a card is decoding its image. */
+  .loading-media {
+    background: #151515;
+  }
+  .skeleton {
+    border-radius: var(--r-sm);
+    background: #141414;
+    position: relative;
+    overflow: hidden;
+  }
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: #1c1c1c;
+    opacity: 0.55;
+    animation: pulse 1.4s var(--ease) infinite;
+  }
+  @keyframes pulse {
+    0%,
+    100% {
+      opacity: 0.25;
+    }
+    50% {
+      opacity: 0.6;
+    }
+  }
+
+  /* Page transitions. Uses the individual translate property rather than
+     transform, so it never becomes a containing block for fixed elements. */
+  @keyframes page-in {
+    from {
+      opacity: 0;
+      translate: 0 10px;
+    }
+    to {
+      opacity: 1;
+      translate: 0 0;
+    }
+  }
+  main {
+    animation: page-in 400ms var(--ease-out) both;
+  }
+
+  /* Cross document fade, where the browser supports it. */
+  ::view-transition-old(root) {
+    animation: fade-out 130ms var(--ease-in) both;
+  }
+  ::view-transition-new(root) {
+    animation: fade-in 300ms var(--ease-out) both;
+  }
+
+  /* Reduced motion keeps a hint of feedback but drops all travel. */
+  @media (prefers-reduced-motion: reduce) {
+    .reveal,
+    .stagger > *,
+    .stagger.in > * {
+      opacity: 1;
+      transform: none;
+      transition:
+        opacity 120ms linear,
+        background-color 120ms linear,
+        border-color 120ms linear;
+    }
+    .modal[open],
+    .modal.closing,
+    .modal[open]::backdrop,
+    .modal.closing::backdrop,
+    .toast,
+    main {
+      animation: fade-in 120ms linear both;
+    }
+    /* The heading sheen stops drifting and settles on a solid colour. */
+    .hero h1 {
+      animation: none;
+      background-position: 50% 0;
+      color: var(--text);
+    }
+    .toast.leaving {
+      opacity: 0;
+      transition: opacity 120ms linear;
+    }
+    .post-card:hover,
+    .message:hover,
+    .album-card:hover,
+    .post-card:hover .media {
+      transform: none;
+    }
+    .btn-nudge {
+      transform: none !important;
+    }
+    ::view-transition-old(root),
+    ::view-transition-new(root) {
+      animation: none;
+    }
+  }
+}

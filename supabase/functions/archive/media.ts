@@ -7,18 +7,38 @@ export const types: Record<string, string> = {
   mp4: "video/mp4",
   webm: "video/webm",
 };
+
+const GIFS = new Set(["image/gif"]);
+
+// First bytes of each supported format, so a renamed file cannot get in.
+const signatures: Record<string, number[][]> = {
+  "image/jpeg": [[0xff, 0xd8, 0xff]],
+  "image/png": [[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]],
+  "image/gif": [
+    [0x47, 0x49, 0x46, 0x38, 0x37, 0x61],
+    [0x47, 0x49, 0x46, 0x38, 0x39, 0x61],
+  ],
+  "image/webp": [],
+  "video/mp4": [],
+  "video/webm": [[0x1a, 0x45, 0xdf, 0xa3]],
+};
+
+const at = (bytes: Uint8Array, index: number) => bytes[index];
+
+const startsWith = (bytes: Uint8Array, pattern: number[]) =>
+  pattern.every((value, index) => at(bytes, index) === value);
+
 export function matchesMagic(bytes: Uint8Array, mime: string): boolean {
-  const ascii = (start: number, end: number) =>
-    String.fromCharCode(...bytes.slice(start, end));
-  if (mime === "image/jpeg")
-    return bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
-  if (mime === "image/png")
-    return [137, 80, 78, 71, 13, 10, 26, 10].every((b, i) => bytes[i] === b);
-  if (mime === "image/gif") return ["GIF87a", "GIF89a"].includes(ascii(0, 6));
   if (mime === "image/webp")
-    return ascii(0, 4) === "RIFF" && ascii(8, 12) === "WEBP";
-  if (mime === "video/webm")
-    return [26, 69, 223, 163].every((b, i) => bytes[i] === b);
-  if (mime === "video/mp4") return ascii(4, 8) === "ftyp" && bytes.length >= 12;
-  return false;
+    return (
+      String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" &&
+      String.fromCharCode(...bytes.slice(8, 12)) === "WEBP"
+    );
+  // ISO base media files carry ftyp at byte 4.
+  if (mime === "video/mp4") return String.fromCharCode(...bytes.slice(4, 8)) === "ftyp";
+  const patterns = signatures[mime];
+  if (!patterns) return false;
+  return patterns.some((pattern) => startsWith(bytes, pattern));
 }
+
+export const isGif = (mime: string) => GIFS.has(mime);
