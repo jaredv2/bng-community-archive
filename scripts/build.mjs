@@ -42,11 +42,20 @@ const settings = {
 const missing = Object.entries(settings)
   .filter(([key, value]) => key.startsWith("API_") && value.startsWith("REPLACE_WITH"))
   .map(([key]) => key);
-if (missing.length)
+if (missing.length) {
+  // On a build server there is no .env to copy, so name both routes.
+  const here = process.env.VERCEL ? "vercel" : process.env.CI ? "github actions" : "this shell";
   throw new Error(
-    `Missing ${missing.join(" and ")}. Copy .env.example to .env and fill it in, then build again.`,
+    [
+      `Missing ${missing.join(" and ")}. The build needs the project url and the publishable key.`,
+      "",
+      "Locally:  cp .env.example .env   then fill in ARCHIVE_API_URL and ARCHIVE_API_KEY",
+      `On ${here}: set ARCHIVE_API_URL and ARCHIVE_API_KEY as environment variables, then rebuild.`,
+      "",
+      "Use the publishable or anon key. Never the service role key.",
+    ].join("\n"),
   );
-
+}
 
 const pages = {
   home: {

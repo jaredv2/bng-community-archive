@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import {
   validateFile,
   text,
@@ -257,6 +258,46 @@ test("pages fade in, and cross document navigation fades where supported", async
   const ui = await readFile("assets/js/ui.js", "utf8");
   assert.ok(!ui.includes("dataset.enter"), "the dead page enter trigger is back");
   assert.ok(!motion.includes("main[data-enter]"), "a dead page enter selector is back");
+});
+
+test("no tracked file can hold a working credential", async () => {
+  // .env.example is deliberately tracked, so it is the most likely place for a
+  // real value to be pasted by accident. Everything git tracks is swept.
+  const tracked = await new Promise((resolve, reject) => {
+    const child = spawn("git", ["ls-files"], { stdio: ["ignore", "pipe", "inherit"] });
+    let out = "";
+    child.stdout.on("data", (chunk) => (out += chunk));
+    child.on("close", (code) => (code === 0 ? resolve(out.trim().split("\n")) : reject(new Error("git ls-files failed"))));
+    child.on("error", reject);
+  });
+
+  const patterns = [
+    /sb_publishable_[A-Za-z0-9_-]{20,}/,
+    /sb_secret_[A-Za-z0-9_-]{20,}/,
+    /eyJhbGciOi[A-Za-z0-9_-]{20,}/,
+    /SUPABASE_SERVICE_ROLE_KEY\s*=\s*["'][^"']+["']/,
+  ];
+
+  const leaks = [];
+  for (const path of tracked) {
+    if (!path) continue;
+    let content;
+    try {
+      content = await readFile(path, "utf8");
+    } catch {
+      continue;
+    }
+    for (const pattern of patterns)
+      if (pattern.test(content)) leaks.push(`${path} matches ${pattern}`);
+  }
+  assert.deepEqual(leaks, [], `credentials in tracked files:\n${leaks.join("\n")}`);
+
+  // The examples must still be examples.
+  const example = await readFile(".env.example", "utf8");
+  assert.ok(example.includes("YOUR-PROJECT-REF"), ".env.example lost its placeholder url");
+  assert.ok(example.includes("YOUR-PUBLISHABLE-OR-ANON-KEY"), ".env.example lost its placeholder key");
+  // And it must be trackable, or the guard above is pointless.
+  assert.ok(tracked.includes(".env.example"), ".env.example is not tracked");
 });
 
 test("the build takes credentials from the environment so CI works without a file", async () => {
