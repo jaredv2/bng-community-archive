@@ -30,7 +30,17 @@ export async function addComment(postId, name, content) {
   );
 }
 
-export async function reserve({ username, caption, tags, ext, mime, size }) {
+export async function reserve({
+  username,
+  caption,
+  tags,
+  ext,
+  mime,
+  size,
+  hasPoster = false,
+  width = null,
+  height = null,
+}) {
   return api("reserve", {
     username: text(username, 60, "Name"),
     caption: text(caption, 1000, "Caption"),
@@ -38,6 +48,9 @@ export async function reserve({ username, caption, tags, ext, mime, size }) {
     ext,
     mime,
     size,
+    has_poster: Boolean(hasPoster),
+    width: Number.isSafeInteger(width) && width > 0 ? width : null,
+    height: Number.isSafeInteger(height) && height > 0 ? height : null,
   });
 }
 

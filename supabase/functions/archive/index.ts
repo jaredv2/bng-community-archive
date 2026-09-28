@@ -188,7 +188,9 @@ Deno.serve(async (req) => {
       const id = crypto.randomUUID();
       const token = crypto.randomUUID() + crypto.randomUUID();
       const path = `${id}_${Date.now()}.${body.ext}`;
-      const posterPath = body.has_poster ? `${id}_poster.webp` : null;
+      // A poster slot is only created when the caller genuinely has one, and
+      // the two urls are always issued together so neither can come back null.
+      const posterPath = body.has_poster === true ? `${id}_poster.webp` : null;
 
       await result(
         service.from("posts").insert({
@@ -211,12 +213,20 @@ Deno.serve(async (req) => {
 
       try {
         const signed = await result(media.createSignedUploadUrl(path, { upsert: false }));
-        const posterUrl = posterPath
-          ? (await result(posters.createSignedUploadUrl(posterPath, { upsert: false }))).signedUrl
-          : null;
+        if (!signed.signedUrl) throw new Error("Could not open an upload slot.");
+        let posterUrl: string | null = null;
+        if (posterPath) {
+          const posterSlot = await result(
+            posters.createSignedUploadUrl(posterPath, { upsert: false }),
+          );
+          posterUrl = posterSlot.signedUrl || null;
+        }
+        // Both slots are resolved before anything is handed back, so the client
+        // never receives a half filled reservation.
         output = { id, token, url: signed.signedUrl, poster_url: posterUrl };
       } catch (error) {
         await service.from("posts").delete().eq("id", id);
+        if (posterPath) await posters.remove([posterPath]).catch(() => {});
         throw error;
       }
     } else if (body.action === "finalize") {

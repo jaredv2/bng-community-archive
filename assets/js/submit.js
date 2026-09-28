@@ -63,12 +63,30 @@ export function submission() {
   let file = null;
   let objectUrl = null;
   let poster = null;
+  let dimensions = { width: null, height: null };
+
+  // Reads the real pixel size, or null when the browser cannot tell us.
+  function measure(blob) {
+    if (blob.type.startsWith("video/")) return { width: null, height: null };
+    return new Promise((resolve) => {
+      const source = URL.createObjectURL(blob);
+      const image = new Image();
+      const done = (value) => {
+        URL.revokeObjectURL(source);
+        resolve(value);
+      };
+      image.onload = () => done({ width: image.naturalWidth, height: image.naturalHeight });
+      image.onerror = () => done({ width: null, height: null });
+      image.src = source;
+    });
+  }
 
   function reset() {
     if (objectUrl) URL.revokeObjectURL(objectUrl);
     objectUrl = null;
     file = null;
     poster = null;
+    dimensions = { width: null, height: null };
     preview.replaceChildren();
     input.value = "";
   }
@@ -111,6 +129,8 @@ export function submission() {
       fieldError(input, null);
       paint();
       label.textContent = "Preparing preview…";
+      // The dimensions let the grid reserve space before the media loads.
+      dimensions = await measure(file);
       const made = await makePoster(file);
       if (file === candidate) {
         poster = made;
@@ -213,21 +233,33 @@ export function submission() {
           ext,
           mime: file.type,
           size: file.size,
+          hasPoster: Boolean(poster),
+          width: dimensions.width,
+          height: dimensions.height,
         });
+        if (!reservation?.id || !reservation?.url)
+          throw new Error("The archive did not issue an upload slot. Please try again.");
 
         progressBlock.hidden = false;
         progress.value = 0;
         label.textContent = "Uploading 0%";
         play("drag");
 
-        const jobs = [
-          upload(reservation.url, file, (percent) => {
-            progress.value = percent;
-            label.textContent = `Uploading ${percent}%`;
-          }),
-        ];
-        if (poster) jobs.push(upload(reservation.poster_url, poster, () => {}));
-        await Promise.all(jobs);
+        // The original has to land or the submission fails.
+        await upload(reservation.url, file, (percent) => {
+          progress.value = percent;
+          label.textContent = `Uploading ${percent}%`;
+        });
+
+        // The thumbnail is a nice to have. If it does not go up, the memory
+        // still posts, so never fail the whole thing over it.
+        if (poster && reservation.poster_url) {
+          try {
+            await upload(reservation.poster_url, poster, () => {});
+          } catch {
+            console.warn("thumbnail upload skipped");
+          }
+        }
 
         label.textContent = "Checking your media…";
         await finalize(reservation.id, reservation.token);
@@ -250,7 +282,11 @@ export function submission() {
   };
 }
 
+// A missing url here would resolve against the current page and 404 on the
+// site itself, which looks like a network fault rather than a real error.
 function upload(url, file, onProgress) {
+  if (typeof url !== "string" || !url.startsWith("https://"))
+    return Promise.reject(new Error("The upload slot was not issued. Please try again."));
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", url);

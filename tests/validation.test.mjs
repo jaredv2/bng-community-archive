@@ -370,6 +370,58 @@ test("every stylesheet import is in a position a browser will honour", async () 
   }
 });
 
+test("an upload never falls back to a url on this site", async () => {
+  // A null url passed to xhr.open becomes the string "null", which the browser
+  // resolves against the current page. That produced a PUT to /submit/null
+  // that 404ed on Vercel and looked like a network fault.
+  const submit = await readFile("assets/js/submit.js", "utf8");
+  const upload = submit.slice(submit.indexOf("function upload("));
+  assert.ok(
+    /if \(typeof url !== "string" \|\| !url\.startsWith/.test(upload),
+    "upload() does not reject a missing url",
+  );
+  assert.ok(upload.indexOf("xhr.open") > upload.indexOf("typeof url"), "the check runs after the request");
+});
+
+test("the poster slot is asked for, and its failure is never fatal", async () => {
+  const actions = await readFile("assets/js/data-actions.js", "utf8");
+  const reserve = actions.slice(actions.indexOf("export async function reserve("));
+  assert.ok(
+    /has_poster:\s*Boolean\(hasPoster\)/.test(reserve),
+    "reserve() never tells the server a poster is coming, so the url comes back null",
+  );
+  assert.ok(/width:/.test(reserve) && /height:/.test(reserve), "the real dimensions are never sent");
+
+  const submit = await readFile("assets/js/submit.js", "utf8");
+  assert.ok(
+    /hasPoster:\s*Boolean\(poster\)/.test(submit),
+    "the submit flow does not pass the poster flag",
+  );
+  // Both urls have to be checked before the first request goes out.
+  assert.ok(
+    /if \(!reservation\?\.id \|\| !reservation\?\.url\)/.test(submit),
+    "the reservation is used without checking it came back complete",
+  );
+  // The poster is optional, so it must not reject the submission.
+  const posterUpload = submit.slice(submit.indexOf("reservation.poster_url"));
+  assert.ok(
+    /try \{[\s\S]{0,400}await upload\(reservation\.poster_url[\s\S]{0,200}catch/.test(posterUpload),
+    "a failed thumbnail upload takes the whole submission down",
+  );
+  assert.ok(!/Promise\.all\(jobs\)/.test(submit), "the optional poster is still in a shared Promise.all");
+
+  // And the server must not hand back a half filled reservation.
+  const fn = await readFile("supabase/functions/archive/index.ts", "utf8");
+  assert.ok(
+    fn.includes("body.has_poster === true"),
+    "the server does not require an explicit poster flag",
+  );
+  assert.ok(
+    /if \(!signed\.signedUrl\) throw/.test(fn),
+    "the server can return a reservation with no upload url",
+  );
+});
+
 test("no em dashes anywhere in the interface copy", async () => {
   const files = [];
   for (const dir of ["assets/js", "assets/css", "src/pages", "supabase", "scripts"]) {
