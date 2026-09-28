@@ -140,27 +140,68 @@ test("the footer credits the two people who made it, as plain text", async () =>
   assert.ok(css.includes(".footer-top"), "the footer top row is missing");
 });
 
-test("the landing heading has one slow neutral sheen and nothing else does", async () => {
+test("the landing heading has one neutral gradient that never cuts the text", async () => {
   const css = await readFile("assets/css/components.css", "utf8");
   const gradients = [...css.matchAll(/linear-gradient\(([\s\S]*?)\)\s*;/g)];
-  // The only gradient in the interface is the heading sheen.
+  // The only gradient in the interface is the heading fill.
   assert.equal(gradients.length, 1, `expected exactly one gradient, found ${gradients.length}`);
   // It has to be neutral, never a hue. "deg" is an angle, not a colour.
   const stops = gradients[0][1].toLowerCase();
   for (const hue of ["hsl", "rgb", "oklch", "oklab", "color(", "#f", "#b", "#d", "violet", "teal", "neon"])
-    assert.ok(!stops.includes(hue), `the sheen uses a colour: ${hue}`);
-  assert.ok(css.includes("@keyframes sheen"), "no sheen animation");
-  // Slow: at least 20 seconds per pass.
-  const seconds = Number(css.match(/animation:\s*sheen\s+(\d+)s/)?.[1] || 0);
-  assert.ok(seconds >= 20, `the sheen runs at ${seconds}s, too fast`);
-  // Only the landing heading, never a card or a background.
-  assert.ok(css.includes("background-clip: text"), "the sheen is not clipped to the text");
-  assert.ok(!/background-image:[^;]*linear-gradient[\s\S]{0,400}?(\.post-card|\.album-card)/.test(css), "a card picked up a gradient");
+    assert.ok(!stops.includes(hue), `the gradient uses a colour: ${hue}`);
+  assert.ok(css.includes("background-clip: text"), "the gradient is not clipped to the text");
 
-  const motion = await readFile("assets/css/motion.css", "utf8");
-  const block = motion.slice(motion.indexOf("prefers-reduced-motion"));
-  assert.ok(block.includes(".hero h1"), "the sheen does not stop for reduced motion");
-  assert.ok(block.includes("animation: none"), "the sheen still animates under reduced motion");
+  // A moving background combined with a transparent text fill leaves any glyph
+  // outside the painted area invisible. That cut "Community" in half, so the
+  // fill has to be static and cover the whole element.
+  assert.ok(!/animation:/.test(gradients[0][0]), "the heading gradient still animates");
+  assert.ok(!css.includes("@keyframes sheen"), "the heading sheen keyframes are still here");
+  const rule = css.slice(css.indexOf(".hero h1 {"), css.indexOf(".hero-lede"));
+  assert.ok(/background-size:\s*100% 100%/.test(rule), "the gradient does not cover the full text");
+  assert.ok(!/background-size:\s*[2-9]\d\d%/.test(css), "a gradient is wider than its text, so it can clip");
+  assert.ok(!/background-position/.test(rule), "the heading fill is positioned, so it can cut");
+
+  // Only the landing heading, never a card or a background.
+  assert.ok(!/background-image:[^;]*linear-gradient[\s\S]{0,400}?(\.post-card|\.album-card)/.test(css), "a card picked up a gradient");
+});
+
+test("gallery cards are square and small enough to scan", async () => {
+  const css = await readFile("assets/css/components.css", "utf8");
+  assert.ok(
+    /\.media \{[^}]*aspect-ratio:\s*1 \/ 1[^}]*object-fit: cover/.test(css),
+    "card media is not a square crop",
+  );
+  assert.ok(/repeat\(4, minmax/.test(css), "the grid is not four across on a wide screen");
+  const responsive = await readFile("assets/css/responsive.css", "utf8");
+  for (const width of [1180, 900, 720]) {
+    assert.ok(
+      new RegExp(`max-width:\\s*${width}px`).test(responsive),
+      `no rule for ${width}px, the card count never steps down`,
+    );
+  }
+  // The full height version is reserved for the viewer, not for a card.
+  const lightbox = css.slice(css.indexOf("  .lightbox {"));
+  assert.ok(lightbox.includes("aspect-ratio: auto"), "the viewer is not free to show the true shape");
+});
+
+test("a gif card plays on hover and rests on the poster otherwise", async () => {
+  const lightbox = await readFile("assets/js/lightbox.js", "utf8");
+  // The card renders the poster, so the animated source has to be carried
+  // separately. Saving node.src would just save the poster and swap it for
+  // itself, which is why hover did nothing.
+  assert.ok(
+    /node\.dataset\.gifSrc = post\.url/.test(lightbox),
+    "the animated gif url is not carried on the node",
+  );
+  const motion = await readFile("assets/js/motion.js", "utf8");
+  const bind = motion.slice(motion.indexOf("export function bindGif"));
+  assert.ok(bind.includes("data-gif-src") || bind.includes("dataset.gifSrc"), "bindGif does not read the animated source");
+  assert.ok(bind.includes("pointerenter") && bind.includes("pointerleave"), "the gif is not driven by hover");
+  assert.ok(/const still = img\.src/.test(bind), "the resting frame is not the poster");
+  // Guarded so re-binding a card cannot stack listeners.
+  assert.ok(bind.includes("gifBound"), "bindGif can attach twice to the same image");
+  // The offscreen observer must not swap sources, or it fights the hover.
+  assert.ok(!/delete node\.dataset\.paused/.test(motion), "the old source swapping observer is still there");
 });
 
 test("an empty archive always renders a placeholder, on every entry point", async () => {
@@ -420,6 +461,60 @@ test("the poster slot is asked for, and its failure is never fatal", async () =>
     /if \(!signed\.signedUrl\) throw/.test(fn),
     "the server can return a reservation with no upload url",
   );
+});
+
+test("the viewer is compact, centred, and always has a way out", async () => {
+  const css = await readFile("assets/css/components.css", "utf8");
+  const lightbox = css.slice(css.indexOf("  .lightbox {"), css.indexOf("  /* Toasts */"));
+
+  // Compact, not a near full screen takeover.
+  assert.ok(/width:\s*min\(900px/.test(lightbox), "the viewer is not a sane width");
+  assert.ok(/max-height:\s*min\(88dvh/.test(lightbox), "the viewer has no height ceiling");
+  assert.ok(!/min-height:\s*4\d dvh|min-height:\s*4\dv h/.test(lightbox), "the stage still forces a tall box");
+
+  // Pinned head and foot around a scrolling middle, so the controls never
+  // scroll out of reach.
+  assert.ok(/\.lightbox \{[^}]*display: flex[^}]*flex-direction: column/.test(lightbox), "the viewer is not a column");
+  for (const part of [".lb-head {", ".lb-scroll {", ".lb-foot {", ".lb-group {"])
+    assert.ok(lightbox.includes(part), `the viewer is missing ${part}`);
+  assert.ok(/\.lb-scroll \{[^}]*overflow-y: auto/.test(lightbox), "the middle does not scroll");
+  assert.ok(/\.lb-head \{[^}]*flex: none/.test(lightbox), "the head scrolls away");
+  assert.ok(/\.lb-foot \{[^}]*flex: none/.test(lightbox), "the foot scrolls away");
+
+  // Breathing room, and no gradient, because the brief says none.
+  assert.ok(/\.lb-caption \{[^}]*padding: 2\dpx/.test(lightbox), "the caption has no breathing room");
+  assert.ok(/\.comments-section \{[^}]*padding: 2\dpx/.test(lightbox), "the comments have no breathing room");
+  assert.ok(!/gradient\(/.test(lightbox), "the viewer picked up a gradient");
+
+  // The rules for the old layout must be gone, not merely overridden.
+  for (const gone of [".lb-bar", ".lb-nav", ".lb-info", ".lb-editor"])
+    assert.ok(!lightbox.includes(gone), `${gone} is left over from the old layout`);
+  const responsive = await readFile("assets/css/responsive.css", "utf8");
+  for (const gone of [".lb-bar", ".lb-info", ".lb-editor"])
+    assert.ok(!responsive.includes(gone), `${gone} is still targeted in the mobile overrides`);
+
+  // The close control lives in the pinned head, not floating over the media.
+  const js = await readFile("assets/js/lightbox.js", "utf8");
+  assert.ok(/head\.append\(headText, close\)/.test(js), "the close button is not in the head");
+  assert.ok(/node\.append\(head, scroll, foot\)/.test(js), "the viewer is not head, scroll, foot");
+  assert.ok(!/stage\.append\(prev, next, close,/.test(js), "the close button is still over the media");
+  assert.ok(js.includes("wireClose(close)"), "the close button is not wired");
+});
+
+test("a dialog's body is actually in the tree", async () => {
+  // The body was created but never appended, so every confirm dialog rendered
+  // as a title and a close button with no content inside.
+  const ui = await readFile("assets/js/ui.js", "utf8");
+  const dialog = ui.slice(ui.indexOf("export function dialog("));
+  assert.ok(/node\.append\(top, body\)/.test(dialog), "the modal body is never added to the dialog");
+  assert.ok(
+    !/body: el\("div", "modal-body"\)/.test(dialog),
+    "a second, detached body is handed to callers",
+  );
+  // The plain modal needs its own padding now that the dialog has none.
+  const css = await readFile("assets/css/components.css", "utf8");
+  assert.ok(/\.modal-body \{[^}]*padding:/.test(css), "the modal body has no padding");
+  assert.ok(/\.modal-top \{[^}]*padding:/.test(css), "the modal head has no padding");
 });
 
 test("no em dashes anywhere in the interface copy", async () => {

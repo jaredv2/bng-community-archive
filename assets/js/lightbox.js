@@ -26,7 +26,12 @@ export function mediaNode(post, { full = false, poster = true } = {}) {
     node.alt = post.caption || `Shared by ${post.username}`;
     node.loading = full ? "eager" : "lazy";
     node.decoding = "async";
-    if (post.media_type === "gif" && !full) node.dataset.gif = "1";
+    // A card shows the poster, so hovering has to swap in the real animation.
+    // Saving node.src here would just save the poster and swap it for itself.
+    if (post.media_type === "gif" && !full && post.url) {
+      node.dataset.gif = "1";
+      node.dataset.gifSrc = post.url;
+    }
     if (post.width && post.height) {
       node.width = post.width;
       node.height = post.height;
@@ -85,6 +90,10 @@ export function openLightbox(post, list, options = {}) {
       syncUrl(null);
     }
   });
+  modal.wireClose(close);
+  // Clicking the backdrop, or any empty part of the frame, closes the viewer.
+  // A press that starts inside the content and drags out must not dismiss it.
+  modal.onDismiss(close);
 
   function show(next) {
     index = (next + items.length) % items.length;
@@ -93,14 +102,23 @@ export function openLightbox(post, list, options = {}) {
     modal.stage.replaceChildren(mediaNode(item, { full: true, poster: false }));
     modal.caption.textContent = item.caption || "";
     modal.counter.textContent = items.length > 1 ? `${index + 1} of ${items.length}` : "";
-    modal.prev.disabled = items.length < 2;
-    modal.next.disabled = items.length < 2;
+    modal.prev.hidden = modal.next.hidden = items.length < 2;
     modal.like.textContent = `♡ ${Number(item.likes || 0).toLocaleString()}`;
     modal.like.classList.toggle("liked", Boolean(item.liked));
-    modal.albums.replaceChildren(...(item.albums || []).map((album) => el("a", "tag-link", `#${album.title}`)));
+    modal.albums.replaceChildren(
+      ...(item.albums || []).map((album) => {
+        const link = el("a", "tag-link", `#${album.title}`);
+        link.href = url(`albums/?a=${encodeURIComponent(album.slug || album.title)}`);
+        link.dataset.sound = "nav";
+        return link;
+      }),
+    );
     modal.meta.textContent = `${date(item.created_at)} · ${item.media_type}`;
     modal.editor.hidden = item.media_type === "video";
     modal.setPost(item);
+    // A new memory starts from the top, not wherever the last one was scrolled.
+    modal.scrollTo?.();
+    reset();
     renderFilmstrip();
     syncUrl(item);
     if (item.media_type === "video") modal.stage.querySelector("video")?.play().catch(() => {});
@@ -326,43 +344,23 @@ export function openLightbox(post, list, options = {}) {
 function makeModal() {
   const node = el("dialog", "modal lightbox");
   node.setAttribute("aria-label", "Memory viewer");
-  node.classList.add("lightbox");
+
+  // Pinned head, so the way out is always reachable.
+  const head = el("div", "lb-head");
+  const headText = el("div", "lb-head-text");
+  const title = el("strong", "");
+  const meta = el("span", "");
+  headText.append(title, meta);
+  const close = el("button", "icon-button lb-close", "×");
+  close.setAttribute("aria-label", "Close viewer");
+  head.append(headText, close);
+
   const stage = el("div", "lb-stage");
   const prev = el("button", "icon-button lb-arrow prev", "‹");
   prev.setAttribute("aria-label", "Previous memory");
   const next = el("button", "icon-button lb-arrow next", "›");
   next.setAttribute("aria-label", "Next memory");
-  const close = el("button", "icon-button lb-close", "×");
-  close.setAttribute("aria-label", "Close viewer");
   const counter = el("span", "lb-badge");
-
-  const info = el("div", "lb-info");
-  const title = el("strong", "");
-  const meta = el("span", "");
-  info.append(title, meta);
-
-  const editor = el("div", "lb-editor");
-  const zoomIn = el("button", "subtle", "+");
-  zoomIn.setAttribute("aria-label", "Zoom in");
-  const zoomOut = el("button", "subtle", "−");
-  zoomOut.setAttribute("aria-label", "Zoom out");
-  const rotate = el("button", "subtle", "↻");
-  rotate.setAttribute("aria-label", "Rotate");
-  const reset = el("button", "subtle", "⤢");
-  reset.setAttribute("aria-label", "Reset view");
-  const mute = el("button", "subtle", "♪");
-  mute.setAttribute("aria-label", "Toggle sound");
-  const like = el("button", "like", "♡ 0");
-  const share = el("button", "subtle", "⤴");
-  share.setAttribute("aria-label", "Share this memory");
-  editor.append(zoomIn, zoomOut, rotate, reset, mute);
-
-  const bar = el("div", "lb-bar");
-  const left = el("div", "lb-nav");
-  left.append(like, share);
-  const right = el("div", "lb-nav");
-  right.append(editor, info);
-  bar.append(left, right);
 
   const caption = el("div", "lb-caption");
   const albums = el("div", "card-tags");
@@ -372,7 +370,7 @@ function makeModal() {
   const conversation = el("div", "comments-section");
   const conversationHeading = el("h3", "", "Conversation");
   const list = el("div", "comments");
-  const showMore = el("button", "subtle load-more", "Show earlier comments");
+  const showMore = el("button", "subtle", "Show earlier comments");
   showMore.hidden = true;
   const form = el("form", "stack comment-form");
   form.noValidate = true;
@@ -396,8 +394,34 @@ function makeModal() {
   form.append(nameLabel, contentLabel, send);
   conversation.append(conversationHeading, list, showMore, form);
 
-  node.append(stage, filmstrip, bar, caption, albums, conversation);
-  stage.append(prev, next, close, counter);
+  // Everything that scrolls sits between two pinned bars.
+  const scroll = el("div", "lb-scroll");
+  scroll.append(filmstrip, stage, caption, albums, conversation);
+
+  const editor = el("div", "lb-group");
+  const zoomIn = el("button", "subtle", "+");
+  zoomIn.setAttribute("aria-label", "Zoom in");
+  const zoomOut = el("button", "subtle", "−");
+  zoomOut.setAttribute("aria-label", "Zoom out");
+  const rotate = el("button", "subtle", "↻");
+  rotate.setAttribute("aria-label", "Rotate");
+  const reset = el("button", "subtle", "⤢");
+  reset.setAttribute("aria-label", "Reset view");
+  const mute = el("button", "subtle", "♪");
+  mute.setAttribute("aria-label", "Toggle sound");
+  editor.append(zoomIn, zoomOut, rotate, reset, mute);
+
+  const like = el("button", "like", "♡ 0");
+  const share = el("button", "subtle", "⤴");
+  share.setAttribute("aria-label", "Share this memory");
+
+  const foot = el("div", "lb-foot");
+  const footActions = el("div", "lb-group");
+  footActions.append(like, share);
+  foot.append(footActions, editor);
+
+  node.append(head, scroll, foot);
+  stage.append(prev, next, counter);
   document.body.append(node);
 
   let offset = 0;
@@ -495,8 +519,31 @@ function makeModal() {
     close() {
       node.close();
     },
+    // The way out is in the pinned head, so it is always reachable.
+    wireClose(handler) {
+      close.onclick = handler;
+    },
+    onDismiss(handler) {
+      let start = null;
+      node.addEventListener("pointerdown", (event) => {
+        start = { x: event.clientX, y: event.clientY };
+      });
+      node.addEventListener("pointerup", (event) => {
+        if (!start) return;
+        // A drag that began on the media is a zoom or a swipe, not a
+        // dismissal, so only a short press on the bare frame closes it.
+        const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y);
+        start = null;
+        if (moved > 6) return;
+        if (event.target === node || event.target.classList.contains("lb-scroll")) handler();
+      });
+    },
+    scrollTo() {
+      scroll.scrollTop = 0;
+    },
     open() {
       play("open");
+      scroll.scrollTop = 0;
       node.showModal();
       close.focus();
     },

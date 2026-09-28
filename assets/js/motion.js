@@ -27,7 +27,8 @@ export function observe(root = document) {
   targets.forEach((node) => observer.observe(node));
 }
 
-// Offscreen media stops decoding. Keeps a wall of GIFs cheap.
+// Offscreen media stops downloading. A hovered gif is driven by bindGif, so
+// nothing here swaps sources, which keeps the two behaviours from fighting.
 let mediaObserver = null;
 export function watchMedia(root = document) {
   if (!("IntersectionObserver" in window)) return;
@@ -37,37 +38,39 @@ export function watchMedia(root = document) {
         for (const entry of entries) {
           const node = entry.target;
           if (node.tagName !== "IMG") continue;
-          if (entry.isIntersecting) node.dataset.wasPaused = "";
-          else if (node.dataset.paused) {
-            delete node.dataset.paused;
-            node.src = node.dataset.src || node.src;
-          }
+          node.loading = entry.isIntersecting ? "eager" : "lazy";
         }
       },
-      { rootMargin: "150px" },
+      { rootMargin: "300px" },
     );
   }
   root.querySelectorAll("img[data-animate]").forEach((n) => mediaObserver.observe(n));
 }
 
-// A GIF only animates while it is hovered or tapped open.
+// A card shows the poster frame, and the animation only runs while the card is
+// hovered or focused, so a wall of gifs stays cheap.
 export function bindGif(root) {
-  root.querySelectorAll("img[data-gif]").forEach((img) => {
-    img.dataset.src = img.src;
+  root.querySelectorAll("img[data-gif][data-gif-src]").forEach((img) => {
+    if (img.dataset.gifBound) return;
+    img.dataset.gifBound = "1";
+    const still = img.src;
+    const animated = img.dataset.gifSrc;
+    if (!animated || animated === still) return;
+
     const stop = () => {
-      if (img.dataset.paused) return;
-      img.dataset.paused = "1";
-      img.src = img.dataset.poster || img.dataset.src;
+      if (img.dataset.gifPlaying) return;
+      img.dataset.gifPlaying = "1";
+      img.src = still;
     };
-    const play = () => {
-      if (!img.dataset.paused) return;
-      delete img.dataset.paused;
-      img.src = img.dataset.src;
+    const start = () => {
+      if (!img.dataset.gifPlaying) return;
+      delete img.dataset.gifPlaying;
+      img.src = animated;
     };
-    const card = img.closest(".post-card") || img;
-    card.addEventListener("pointerenter", play);
+    const card = img.closest(".post-card") || img.closest(".album-card") || img;
+    card.addEventListener("pointerenter", start);
     card.addEventListener("pointerleave", stop);
-    card.addEventListener("focusin", play);
+    card.addEventListener("focusin", start);
     card.addEventListener("focusout", stop);
   });
 }

@@ -196,10 +196,9 @@
     main {
       animation: fade-in 120ms linear both;
     }
-    /* The heading sheen stops drifting and settles on a solid colour. */
+    /* The heading is a static gradient, so there is nothing to stop here. */
     .hero h1 {
       animation: none;
-      background-position: 50% 0;
       color: var(--text);
     }
     .toast.leaving {

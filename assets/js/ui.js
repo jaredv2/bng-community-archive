@@ -201,9 +201,11 @@ export function dialog(title, className = "modal") {
   close.setAttribute("aria-label", "Close");
   close.dataset.sound = "close";
   close.onclick = () => shut();
-  top.append(heading, close);
-  node.append(top);
-  document.body.append(node);
+    top.append(heading, close);
+    // The body has to be in the tree, or every dialog renders as an empty box.
+    const body = el("div", "modal-body");
+    node.append(top, body);
+    document.body.append(node);
 
   let returnTo = null;
   function shut() {
@@ -229,7 +231,7 @@ export function dialog(title, className = "modal") {
 
   return {
     node,
-    body: el("div", "modal-body"),
+    body,
     open() {
       returnTo = document.activeElement;
       node.showModal();
