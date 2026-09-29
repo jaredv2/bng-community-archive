@@ -141,6 +141,12 @@
     .lb-foot button {
       min-height: 38px;
     }
+    /* The editor row is five glyph buttons. Trimming the horizontal padding
+       keeps it on one line down to about 360px, so the foot stays a single
+       bar instead of wrapping into two on every phone. */
+    .lb-group button {
+      padding: 8px 11px;
+    }
     .lb-group {
       gap: 6px;
     }

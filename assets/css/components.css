@@ -878,8 +878,13 @@
     position: relative;
     display: grid;
     place-items: center;
-    /* These let the grid actually constrain its child instead of being
-       stretched by it. Without them a tall image forces the stage open. */
+    /* This is a flex child of .lb-scroll. The min-width/min-height zero are
+       what let the grid constrain the image instead of being stretched by it,
+       but they also let the stage itself shrink below its own content, which
+       flattened the image into a sliver whenever the caption and the comment
+       form did not leave 46dvh behind. flex:none keeps the stage at the
+       height the image asked for, and the scroll area does the scrolling. */
+    flex: none;
     min-width: 0;
     min-height: 0;
     overflow: hidden;
@@ -1002,6 +1007,9 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    /* Wrapping is the backstop. Seven pinned controls do not fit a narrow
+       phone, and a clipped zoom or rotate button is worse than a second row. */
+    flex-wrap: wrap;
     gap: 12px;
     padding: 14px 18px;
     border-top: 1px solid var(--border);
@@ -1011,7 +1019,9 @@
   .lb-group {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
+    min-width: 0;
   }
   .lb-foot button {
     min-height: 40px;
