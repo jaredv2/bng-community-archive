@@ -1,7 +1,7 @@
 import { connected, result, signPosts, ready } from "./data.js";
 import { $, $$, el, empty, showEmpty, date, url } from "./ui.js";
 import { config } from "./config.js";
-import { mediaNode, openLightbox, readDeepLink, closeLightbox } from "./lightbox.js";
+import { mediaNode, openLightbox, readDeepLink, deepLinkId } from "./lightbox.js";
 import { observe, watchMedia, bindGif } from "./motion.js";
 import { play } from "./sound.js";
 
@@ -260,12 +260,21 @@ export async function loadGallery(root, options = {}) {
 
   if (home) return loaded;
 
-  // Restore a shared link straight into the viewer.
-  const target = readDeepLink(loaded);
-  if (target) openLightbox(target, loaded);
-  window.addEventListener("popstate", () => {
-    if (location.search.includes("post=")) return;
-    closeLightbox();
-  });
+  // A shared ?post= link opens straight into the viewer. Nothing here writes
+  // the id back, so the address bar keeps whatever the visitor arrived with.
+  const deepLink = readDeepLink(loaded);
+  if (deepLink) {
+    openLightbox(deepLink, loaded);
+  } else if (deepLinkId()) {
+    // The link points at a memory that is not on this page, so fetch it. The
+    // list stays exactly as it is; only the viewer opens.
+    try {
+      const { loadPost } = await import("./data-actions.js");
+      const post = await loadPost(deepLinkId());
+      if (post) openLightbox(post, [post]);
+    } catch {
+      // A stale or mistyped link just leaves the gallery as it is.
+    }
+  }
   return loaded;
 }

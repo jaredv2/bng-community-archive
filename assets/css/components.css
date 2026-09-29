@@ -435,6 +435,12 @@
   .media {
     display: block;
     width: 100%;
+    /* A card is a fixed square. The width/height attributes mediaNode() writes
+       on the node are presentational hints, so they make height definite and
+       the aspect-ratio below is ignored, which is what left tall uploads
+       rendering at their full 1600px height in a 277px column. height:auto
+       drops the hint so the aspect ratio governs. */
+    height: auto;
     aspect-ratio: 1 / 1;
     object-fit: cover;
     background: #131313;

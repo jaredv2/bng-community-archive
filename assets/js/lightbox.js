@@ -40,24 +40,16 @@ export function mediaNode(post, { full = false, poster = true } = {}) {
   return node;
 }
 
-// Keeps ?post=<id> in the address bar so any view can be linked. Clearing it
-// on close has to work even though current is already null by then, or a
-// reload reopens the viewer from the stale address.
-function syncUrl(post) {
-  const target = url("gallery/");
-  const next = post ? `${target}?post=${encodeURIComponent(post.id)}` : target;
-  history.replaceState({ post: post?.id || null }, "", next);
-}
-
 export function closeLightbox() {
   const open = current;
   if (!open) return;
   current = null;
   play("close");
   open.modal.node.classList.add("closing");
-  open.stage.querySelectorAll("video").forEach((video) => video.pause());
+  // The stage hangs off the modal. Reading it off the view threw here, which
+  // stopped the dialog from ever closing.
+  open.modal.stage.querySelectorAll("video").forEach((video) => video.pause());
   open.modal.close();
-  syncUrl(null);
   if (open.origin) open.origin.focus?.();
 }
 
@@ -88,7 +80,6 @@ export function openLightbox(post, list, options = {}) {
     if (current === view) {
       current = null;
       origin?.removeAttribute?.("data-lightbox");
-      syncUrl(null);
     }
   });
   modal.wireClose(close);
@@ -100,7 +91,11 @@ export function openLightbox(post, list, options = {}) {
     index = (next + items.length) % items.length;
     const item = items[index];
     modal.setTitle(`${item.username} · ${relative(item.created_at)}`);
-    modal.stage.replaceChildren(mediaNode(item, { full: true, poster: false }));
+    // Swap the media only. Replacing the whole stage would take the arrows and
+    // the counter with it, because they are its siblings and makeModal appends
+    // them once, before the first show().
+    modal.stage.querySelector(".media")?.remove();
+    modal.stage.prepend(mediaNode(item, { full: true, poster: false }));
     modal.caption.textContent = item.caption || "";
     modal.counter.textContent = items.length > 1 ? `${index + 1} of ${items.length}` : "";
     modal.prev.hidden = modal.next.hidden = items.length < 2;
@@ -121,7 +116,6 @@ export function openLightbox(post, list, options = {}) {
     modal.scrollTo?.();
     reset();
     renderFilmstrip();
-    syncUrl(item);
     if (item.media_type === "video") modal.stage.querySelector("video")?.play().catch(() => {});
   }
 
@@ -551,9 +545,14 @@ function makeModal() {
   };
 }
 
+// The id a shared link asks for, whether or not it is on the current page.
+export function deepLinkId() {
+  return new URLSearchParams(location.search).get("post");
+}
+
 // Lets a deep link reopen the viewer on load.
 export function readDeepLink(posts) {
-  const id = new URLSearchParams(location.search).get("post");
+  const id = deepLinkId();
   if (!id) return null;
   return posts.find((post) => post.id === id) || null;
 }

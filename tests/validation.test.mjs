@@ -517,18 +517,35 @@ test("a dialog's body is actually in the tree", async () => {
   assert.ok(/\.modal-top \{[^}]*padding:/.test(css), "the modal head has no padding");
 });
 
-test("closing the viewer always clears the shared address", async () => {
-  // syncUrl used to bail out when current was already null, but closeLightbox
-  // nulls current before calling it. The address stayed on ?post=, so a reload
-  // reopened the viewer and the memory could never really be left behind.
+test("the viewer reads the shared id but never rewrites the address", async () => {
+  // Opening a memory used to push ?post= into the address bar, which turned the
+  // browser back button into a viewer toggle and left the archive with a url
+  // that no longer matched the list behind it. The id is now only ever read.
   const js = await readFile("assets/js/lightbox.js", "utf8");
-  const sync = js.slice(js.indexOf("function syncUrl("), js.indexOf("}", js.indexOf("function syncUrl(")) + 1);
-  assert.ok(!sync.includes("if (!current)"), "syncUrl still refuses to clear when nothing is open");
-  const close = js.slice(js.indexOf("export function closeLightbox()"), js.indexOf("}", js.indexOf("syncUrl(null);")) + 1);
-  assert.ok(close.includes("current = null") && close.includes("syncUrl(null)"), "close does not clear the address");
   assert.ok(
-    close.indexOf("current = null") < close.indexOf("syncUrl(null)"),
-    "close clears the address before dropping the reference",
+    !/history\.(replaceState|pushState)/.test(js),
+    "the viewer still rewrites the address bar",
+  );
+  assert.ok(js.includes("export function deepLinkId()"), "the shared id is never read");
+  assert.ok(
+    js.includes("new URLSearchParams(location.search).get(\"post\")"),
+    "the shared id is not taken from the query string",
+  );
+
+  // A shared link can point at a memory that is not on the current page, so the
+  // gallery has to be able to fetch it rather than only searching what it has.
+  const gallery = await readFile("assets/js/gallery.js", "utf8");
+  assert.ok(gallery.includes("loadPost("), "an off-page deep link is never fetched");
+  assert.ok(
+    gallery.includes("openLightbox(post, [post])"),
+    "a fetched memory is not opened on its own, so the list stays as it was",
+  );
+
+  const actions = await readFile("assets/js/data-actions.js", "utf8");
+  assert.ok(actions.includes("export async function loadPost("), "loadPost is missing");
+  assert.ok(
+    /loadPost\(id\)[\s\S]*?\.eq\("id", id\)[\s\S]*?\.eq\("status", "approved"\)/.test(actions),
+    "loadPost does not scope the fetch to one approved memory",
   );
 });
 
@@ -588,6 +605,32 @@ test("form handlers swallow failures instead of leaking unhandled rejections", a
       `${file} calls busy() in a handler, use attempt() instead`,
     );
   }
+});
+
+test("a card image is a square, whatever the upload's own proportions", async () => {
+  // mediaNode() writes width/height onto the node so the browser can reserve
+  // space. Those are presentational hints, so they make height definite and the
+  // card's aspect-ratio is ignored, which left a 400x1600 upload rendering at
+  // 1600px tall inside a 277px column. height:auto has to stay on .media.
+  const css = await readFile("assets/css/components.css", "utf8");
+  const media = css.slice(css.indexOf("\n  .media {"), css.indexOf("\n  .media-tag"));
+  assert.ok(/aspect-ratio:\s*1\s*\/\s*1/.test(media), "the card image has no square aspect ratio");
+  assert.ok(/height:\s*auto/.test(media), "the card image lets the height attribute win over aspect-ratio");
+  assert.ok(/object-fit:\s*cover/.test(media), "the card image is not cropped to the square");
+
+  // The viewer is the opposite case: it fits the whole image inside the stage.
+  const stage = css.slice(css.indexOf(".lb-stage .media {"), css.indexOf(".lb-stage.zoomed"));
+  assert.ok(/max-height:/.test(stage), "the viewer image has no height cap");
+  assert.ok(/object-fit:\s*contain/.test(stage), "the viewer image crops instead of fitting");
+});
+
+test("the viewer stage holds the image the image asked for", async () => {
+  // min-height:0 lets the grid constrain the image, but as a flex child it
+  // also let the stage shrink below its own content, flattening tall uploads
+  // into a sliver. flex:none keeps the stage at the image's height.
+  const css = await readFile("assets/css/components.css", "utf8");
+  const stage = css.slice(css.indexOf("\n  .lb-stage {"), css.indexOf(".lb-stage .media"));
+  assert.ok(/flex:\s*none/.test(stage), "the stage can still be squashed by the scroll area");
 });
 
 test("a blocked origin produces an actionable message", async () => {
